@@ -1,0 +1,9 @@
+# Dockerfile.conda
+FROM continuumio/miniconda3
+WORKDIR /app
+COPY environment.yml .
+RUN conda env create -f environment.yml && conda clean --all
+SHELL ["conda", "run", "-n", "myenv", "/bin/bash", "-c"]
+COPY . .
+EXPOSE 8000
+CMD ["conda", "run", "-n", "myenv", "python", "manage.py", "runserver", "0.0.0.0:8000"]
