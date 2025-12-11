@@ -1,9 +1,30 @@
-# Dockerfile.conda
 FROM continuumio/miniconda3
 WORKDIR /app
+
+# 먼저 OS 레벨 GDAL 설치
+RUN apt-get update && apt-get install -y \
+    gdal-bin \
+    libgdal-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# conda 환경 생성
 COPY environment.yml .
 RUN conda env create -f environment.yml && conda clean --all
+
+ENV PATH="/opt/conda/envs/myenv/bin:$PATH"
+ENV LD_LIBRARY_PATH="/opt/conda/envs/myenv/lib:$LD_LIBRARY_PATH"
+ENV GDAL_DATA="/opt/conda/envs/myenv/share/gdal"
+ENV PROJ_LIB="/opt/conda/envs/myenv/share/proj"
+
 SHELL ["conda", "run", "-n", "myenv", "/bin/bash", "-c"]
 COPY . .
+
+# manage.py를 conda 래퍼로 교체
+RUN mv /app/manage.py /app/manage.py.orig && \
+    echo '#!/bin/bash' > /app/manage.py && \
+    echo 'exec conda run -n myenv python /app/manage.py.orig \"$@\"' >> /app/manage.py && \
+    chmod +x /app/manage.py
+
 EXPOSE 8000
+
 CMD ["conda", "run", "-n", "myenv", "python", "manage.py", "runserver", "0.0.0.0:8000"]

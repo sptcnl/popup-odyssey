@@ -11,18 +11,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   django:
-    build: .
-    depends_on:
-      - db
-    environment:
-      - DATABASE_URL=postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@db:5432/${LOCAL_DB_NAME}
-    ports:
-      - "8000:8000"
-    volumes:
-      - .:/app
-
-  conda-app:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile.conda
     depends_on:
@@ -30,7 +19,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@db:5432/${LOCAL_DB_NAME}
     ports:
-      - "8001:8000"
+      - "8000:8000"
     volumes:
       - .:/app
 
