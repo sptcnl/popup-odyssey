@@ -1,5 +1,5 @@
 from django.db import models
-from routes.models import Route
+from apps.routes.models import Route
 from django.contrib.auth import get_user_model
 
 User = get_user_model()

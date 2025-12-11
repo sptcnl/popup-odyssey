@@ -22,6 +22,12 @@ environ.Env.read_env(
     env_file=os.path.join(BASE_DIR, '.env')
 )
 
+# GDAL 라이브러리 경로 (conda 환경 기준)
+GDAL_LIBRARY_PATH = '/opt/conda/envs/myenv/lib/libgdal.so'
+
+# 추가로 필요한 환경변수들
+os.environ['GDAL_DATA'] = '/opt/conda/envs/myenv/share/gdal'
+os.environ['PROJ_LIB'] = '/opt/conda/envs/myenv/share/proj'
 
 # Application definition
 
