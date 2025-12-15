@@ -12,8 +12,8 @@ from drf_spectacular.utils import extend_schema_field, extend_schema, OpenApiExa
 class PlaceViewSet(viewsets.ModelViewSet):
     queryset = Place.objects.all()
     serializer_class = PlaceSerializer
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['categories__name']  # 카테고리 필터링
+    filter_backends = []
+    filterset_fields = []
     
     @extend_schema(
         summary="인기 장소 랭킹 TOP N",
