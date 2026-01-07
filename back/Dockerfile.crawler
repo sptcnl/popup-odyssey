@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+# 시스템 패키지 + 한국 시간대
+RUN apt-get update && apt-get install -y \
+    wget gnupg unzip curl \
+    chromium chromium-driver cron tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /var/log \
+    && touch /var/log/cron.log \
+    && chmod 666 /var/log/cron.log
+
+# KST 시간대 설정
+RUN ln -sf /usr/share/zoneinfo/Asia/Seoul /etc/localtime \
+    && echo "Asia/Seoul" > /etc/timezone
+
+WORKDIR /app
+COPY crawler/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY crawler/crawler.py .
+RUN chmod +x crawler.py
+
+# 매일 오전 9시 KST 실행
+RUN echo "0 9 * * * /usr/local/bin/python /app/crawler.py >> /var/log/cron.log 2>&1" | crontab -
+
+CMD cron && tail -f /var/log/cron.log

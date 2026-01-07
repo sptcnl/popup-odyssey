@@ -1,0 +1,4 @@
+selenium==4.15.2
+psycopg2-binary==2.9.11
+pandas==2.1.4
+python-dotenv==1.0.0

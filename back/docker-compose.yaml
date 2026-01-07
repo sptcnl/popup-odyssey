@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:16.9
+    environment:
+      POSTGRES_DB: ${LOCAL_DB_NAME}
+      POSTGRES_USER: ${LOCAL_DB_USER}
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD}
+    ports:
+      - "${LOCAL_DB_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LOCAL_DB_USER} -d ${LOCAL_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  django:
+    build:
+      context: .
+      dockerfile: Dockerfile.conda
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@db:5432/${LOCAL_DB_NAME}
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+  
+  popup-crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile.crawler
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@db:5432/${LOCAL_DB_NAME}
+      - DISPLAY=  # headless Chrome용
+    volumes:
+      - ./crawler:/app/crawler:ro
+      - ./data:/app/data  # CSV 백업
+    restart: unless-stopped
+    profiles:
+      - crawler  # docker-compose --profile crawler up
+
+volumes:
+  postgres_data:
