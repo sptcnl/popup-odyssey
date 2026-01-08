@@ -38,13 +38,13 @@ services:
         condition: service_healthy
     environment:
       - DATABASE_URL=postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@db:5432/${LOCAL_DB_NAME}
-      - DISPLAY=  # headless Chrome용
     volumes:
-      - ./crawler:/app/crawler:ro
-      - ./data:/app/data  # CSV 백업
+      # - ./crawler:/app/crawler:ro
+      - ./data:/app/data
+      - /tmp:/tmp  # 디버그 파일용
     restart: unless-stopped
     profiles:
-      - crawler  # docker-compose --profile crawler up
+      - crawler
 
 volumes:
   postgres_data:
