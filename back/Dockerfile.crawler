@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 # 시스템 의존성 + Chrome 완전 설치 (Selenium 최적화)
 RUN apt-get update && apt-get install -y \

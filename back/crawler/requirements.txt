@@ -3,3 +3,5 @@ webdriver-manager==4.0.2
 pandas==2.2.3
 psycopg2-binary==2.9.9
 SQLAlchemy==2.0.35
+requests==2.31.0
+python-dotenv==1.0.0

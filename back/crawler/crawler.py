@@ -4,19 +4,76 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 import time
 import pandas as pd
 import json
-import psycopg2
-from psycopg2.extras import execute_values
 from sqlalchemy import create_engine
 import os
-from datetime import datetime
-from urllib.parse import quote_plus
+import re
+from dotenv import load_dotenv
+import requests
+
+# 환경변수 로드
+load_dotenv('/app/.env')
+
+def validate_url(url):
+    """URL 유효성 검사 및 정규화"""
+    if not url or not isinstance(url, str):
+        return False, ""
+    
+    url = url.strip()
+    if url.count("https://popga.co.kr") > 1:
+        url = re.sub(r'https://popga\.co\.krhttps://popga\.co\.kr', 'https://popga.co.kr', url)
+    
+    url_pattern = re.compile(r'^https?://', re.IGNORECASE)
+    if not url_pattern.match(url):
+        if url.startswith("/"):
+            url = f"https://popga.co.kr{url}"
+        else:
+            url = f"https://popga.co.kr/{url}"
+    
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        if parsed.scheme and parsed.netloc:
+            return True, url
+        return False, ""
+    except:
+        return False, ""
+
+def geocode_naver_map(address, client_id, client_secret):
+    """네이버 지오코드 API"""
+    if not all([address, client_id, client_secret]):
+        return {'validated': False}
+    
+    url = "https://maps.apigw.ntruss.com/map-geocode/v2/geocode"
+    headers = {
+        "X-NCP-APIGW-API-KEY-ID": client_id.strip(),
+        "X-NCP-APIGW-API-KEY": client_secret.strip(),
+        "Accept": "application/json"
+    }
+    params = {"query": address.strip()}
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('status') == 'OK' and data.get('addresses'):
+            addr_info = data['addresses'][0]
+            if addr_info.get('roadAddress'):
+                return {
+                    'road_address': addr_info['roadAddress'],
+                    'x': addr_info.get('x'), 
+                    'y': addr_info.get('y'),
+                    'validated': True
+                }
+        return {'validated': False}
+    except:
+        return {'validated': False}
 
 def create_driver():
-    """안전한 ChromeDriver 생성"""
+    """Chrome 드라이버 생성 (Headless)"""
     chrome_options = Options()
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
@@ -24,87 +81,169 @@ def create_driver():
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-    
     service = Service("/usr/local/bin/chromedriver")
     return webdriver.Chrome(service=service, options=chrome_options)
 
 def get_db_connection():
-    """PostgreSQL 연결 - DATABASE_URL 사용"""
+    """DB 연결"""
     database_url = os.getenv('DATABASE_URL')
     if database_url:
-        # DATABASE_URL 파싱해서 연결
-        from sqlalchemy import create_engine
-        from sqlalchemy.engine.url import URL
         engine = create_engine(database_url)
         return engine.raw_connection()
-
-def get_sqlalchemy_engine():
-    """SQLAlchemy 엔진 반환 - DATABASE_URL 사용"""
-    database_url = os.getenv('DATABASE_URL')
-    if database_url:
-        return create_engine(database_url)
+    return None
 
 def create_table(conn):
-    """팝업스토어 테이블 생성"""
+    """테이블 생성"""
     cursor = conn.cursor()
-    create_table_sql = """
+    cursor.execute("""
     CREATE TABLE IF NOT EXISTS popga_popups (
-        id SERIAL PRIMARY KEY,
-        crawl_id VARCHAR(50) NOT NULL,
-        title VARCHAR(500) NOT NULL,
+        id VARCHAR(50) PRIMARY KEY,
+        popup_name VARCHAR(500),
+        detailed_address TEXT,
         category VARCHAR(100),
-        location VARCHAR(200),
         status VARCHAR(50),
-        period VARCHAR(100),
-        url TEXT,
-        crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(crawl_id, title, url)
+        popup_date VARCHAR(100),
+        detail_link TEXT,
+        notice TEXT,
+        visit_events TEXT,
+        on_site_events TEXT,
+        purchase_events TEXT,
+        geo_x VARCHAR(20),
+        geo_y VARCHAR(20),
+        geo_validated BOOLEAN DEFAULT FALSE,
+        crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-    """
-    cursor.execute(create_table_sql)
+    """)
     conn.commit()
     cursor.close()
-    print("✅ 테이블 생성/확인 완료")
+    print("✅ 테이블 생성 완료")
+
+def scrape_detail_page(driver, detail_url):
+    """상세 페이지 크롤링"""
+    try:
+        print(f"  🔍 {detail_url}")
+        driver.get(detail_url)
+        time.sleep(4)
+        
+        # 주소
+        detailed_address = ''
+        try:
+            detailed_address = driver.find_elements(By.XPATH, 
+                "//h3[contains(text(),'위치')]/following::p[contains(@class,'text-black-800')]")[0].text.strip()
+        except: pass
+        
+        # 기간
+        detailed_period = ''
+        try:
+            detailed_period = driver.find_elements(By.XPATH, 
+                "//h3[contains(text(),'일정')]/following::p[contains(@class,'font-bold')][1]")[0].text.strip()
+        except: pass
+        
+        # 운영시간 (엄격 필터링)
+        hours_elems = driver.find_elements(By.XPATH, 
+            "//h3[contains(text(),'일정')]/following::p[not(contains(@class,'font-bold'))][position()<4]")
+        
+        opening_hours_list = []
+        for elem in hours_elems:
+            text = elem.text.strip()
+            if (text.startswith('📢') or 
+                re.search(r'\d{2}\.\s*\d{1,2}\.\s*\d{1,2}', text) or
+                any(x in text for x in ['[브랜드', '[팝업', '[추천', '[실시간', '[주차']) or
+                len(text) > 30):
+                continue
+            
+            if (re.search(r'[0-2]?[0-9]:[0-5][0-9]\s*~', text) or 
+                re.search(r'(월|화|수|목|금|토|일).*?[0-2]?[0-9]:[0-5][0-9]', text)):
+                opening_hours_list.append(text)
+        
+        opening_hours = ' | '.join(opening_hours_list)
+        
+        # 공지사항
+        notice = ''
+        try:
+            notice_elems = driver.find_elements(By.XPATH, 
+                "//h3[contains(text(),'공지사항')]/following::p[contains(@class,'whitespace-pre-line')]"
+                "//p[contains(text(),'📢') or starts-with(text(),'📢')]")
+            if notice_elems:
+                notice = ' | '.join([e.text.strip() for e in notice_elems[:3]])
+        except: pass
+        
+        # 혜택 3분류 (방문/현장/구매)
+        visit_events = on_site_events = purchase_events = ''
+        benefit_btns = driver.find_elements(By.XPATH, 
+            "//h3[contains(text(),'혜택')]/following::button[contains(@class,'rounded-full') or contains(@id,'btn-benefit')]")
+        benefit_descs = driver.find_elements(By.XPATH, 
+            "//h3[contains(text(),'혜택')]/following::div[contains(@class,'border')]//p[contains(@class,'text-black-800') or contains(@class,'whitespace-pre-line')]")
+        
+        btn_texts = [btn.text.strip() for btn in benefit_btns if btn.text.strip()]
+        desc_text = ' '.join([t.text.strip() for t in benefit_descs[:2]])
+        
+        for btn_text in btn_texts:
+            btn_lower = btn_text.lower()
+            if any(x in btn_lower for x in ['sns', '인증', '방문']):
+                visit_events = f"{btn_text}: {desc_text[:150]}"
+            elif any(x in btn_lower for x in ['현장', '체험', '포토']):
+                on_site_events = f"{btn_text}: {desc_text[:150]}"
+            elif any(x in btn_lower for x in ['구매', '고객']):
+                purchase_events = f"{btn_text}: {desc_text[:150]}"
+        
+        print(f"    📍 {detailed_address[:40]}")
+        print(f"    📅 {detailed_period[:40]}")
+        print(f"    🕒 {opening_hours or '없음'}")
+        print(f"    👤 방문: {visit_events[:30] or '없음'}...")
+        print(f"    🎁 현장: {on_site_events[:30] or '없음'}...")
+        print(f"    🛒 구매: {purchase_events[:30] or '없음'}...")
+        print("    ✅")
+        
+        return {
+            'detailed_address': detailed_address,
+            'detailed_period': detailed_period,
+            'opening_hours': opening_hours,
+            'notice': notice,
+            'visit_events': visit_events,
+            'on_site_events': on_site_events,
+            'purchase_events': purchase_events
+        }
+    except Exception as e:
+        print(f"    ❌ {str(e)[:50]}")
+        return {
+            'detailed_address': '', 'detailed_period': '', 'opening_hours': '',
+            'notice': '', 'visit_events': '', 'on_site_events': '', 'purchase_events': ''
+        }
 
 def crawl_popga_popups():
-    """팝가 팝업스토어 크롤링"""
+    """팝가 리스트 크롤링"""
     driver = None
     try:
         driver = create_driver()
         url = "https://popga.co.kr/list/popup?periodTypes%5B0%5D=IN_PROGRESS&periodTypes%5B1%5D=READY&size=12&sorts%5B0%5D.order=activated_at&areaCodes%5B0%5D=1120011400&areaCodes%5B1%5D=1120011500"
         
-        print("🚀 페이지 접속 중...")
+        print("🚀 리스트 접속...")
         driver.get(url)
-        
-        # 로딩 스피너 사라질 때까지 대기
-        wait = WebDriverWait(driver, 20)
-        wait.until_not(EC.presence_of_element_located((By.CSS_SELECTOR, ".spinner")))
+        WebDriverWait(driver, 20).until_not(EC.presence_of_element_located((By.CSS_SELECTOR, ".spinner")))
         time.sleep(3)
         
-        # 무한스크롤로 모든 데이터 로드
-        print("📜 데이터 로딩 중...")
+        print("📜 무한 스크롤...")
         last_height = driver.execute_script("return document.body.scrollHeight")
-        scroll_count = 0
-        while scroll_count < 5:
+        for _ in range(5):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
             new_height = driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height:
-                break
+            if new_height == last_height: break
             last_height = new_height
-            scroll_count += 1
         
-        # 팝업 article들 수집
         articles = driver.find_elements(By.CSS_SELECTOR, "article.relative")
-        print(f"✅ 총 {len(articles)}개 팝업 발견!")
+        print(f"✅ {len(articles)}개 팝업 발견")
         
         popup_data = []
-        crawl_id = f"popga_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        for i, article in enumerate(articles, 1):
+        for idx in range(len(articles)):
             try:
+                article = articles[idx]
+                i = idx + 1
+                
                 link_elem = article.find_element(By.CSS_SELECTOR, "a")
                 link = link_elem.get_attribute("href")
+                url_valid, clean_url = validate_url(link or "")
                 
                 title = article.find_element(By.CSS_SELECTOR, "p.line-clamp-1").text.strip()
                 category = article.find_element(By.CSS_SELECTOR, "span.rounded.bg-black-200").text.strip()
@@ -112,93 +251,141 @@ def crawl_popga_popups():
                 status = article.find_element(By.CSS_SELECTOR, "p.text-black-500").text.strip()
                 period = article.find_element(By.CSS_SELECTOR, "p.text-xs.text-black-500").text.strip()
                 
-                popup_data.append({
-                    "crawl_id": crawl_id,
-                    "title": title,
-                    "category": category,
-                    "location": location,
-                    "status": status,
-                    "period": period,
-                    "url": f"https://popga.co.kr{link}"
-                })
-                print(f"  📌 {i}. {title} ({category})")
-                
+                if url_valid:
+                    popup_data.append({
+                        "title": title, "category": category,
+                        "location": location, "status": status, 
+                        "period": period, "url": clean_url
+                    })
+                    print(f"  📋 [{i}/{len(articles)}] {title[:30]}...")
+                    
             except Exception as e:
-                print(f"  ⚠️  {i}번 항목 스킵: {str(e)[:50]}")
+                print(f"  ❌ 리스트 [{i}/{len(articles)}] 스킵")
                 continue
         
         return popup_data
         
     except Exception as e:
-        print(f"❌ 크롤링 에러: {e}")
+        print(f"❌ 리스트 전체 에러: {e}")
         return []
-    
     finally:
         if driver:
-            try:
-                driver.quit()
-            except:
-                pass
+            driver.quit()
 
-def save_to_postgres(popups):
-    """PostgreSQL에 데이터 저장 - DATABASE_URL 우선 지원"""
-    if not popups:
-        print("😞 저장할 데이터 없음")
-        return
+def process_and_validate_popups(raw_popups):
+    """상세 크롤링 + 지오코딩"""
+    validated_popups = []
+    naver_client_id = os.getenv('NAVER_CLIENT_ID')
+    naver_client_secret = os.getenv('NAVER_CLIENT_SECRET')
+    driver = create_driver()
     
-    conn = None
+    db_conn = None
     try:
-        engine = get_sqlalchemy_engine()
-        conn = get_db_connection()
-        create_table(conn)
+        db_conn = get_db_connection()
+        if db_conn:
+            create_table(db_conn)
+    except:
+        print("⚠️ DB 연결 생략")
+        db_conn = None
+    
+    total_count = len(raw_popups)
+    for idx in range(total_count):
+        i = idx + 1
+        popup = raw_popups[idx]
         
-        # 데이터프레임 생성 후 저장
-        df = pd.DataFrame(popups)
-        df.to_sql('popga_popups', engine, if_exists='append', index=False, method='multi')
-        
-        # 삽입된 건수 확인
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT COUNT(*) FROM popga_popups 
-            WHERE crawl_id = %s
-        """, (popups[0]['crawl_id'],))
-        count = cursor.fetchone()[0]
-        cursor.close()
-        
-        print(f"✅ PostgreSQL에 {count}개 데이터 저장 완료!")
-        print(f"📊 크롤링 배치 ID: {popups[0]['crawl_id']}")
-        print(f"🔗 DATABASE_URL 사용: {'Yes' if os.getenv('DATABASE_URL') else 'No (LOCAL_DB vars)'}")
-        
-    except Exception as e:
-        print(f"❌ DB 저장 에러: {e}")
-    finally:
-        if conn:
-            conn.close()
+        try:
+            print(f"\n[{i}/{total_count}] {popup.get('title', 'No Title')[:30]}...")
+            
+            url_valid, clean_url = validate_url(popup.get('url', ''))
+            if not url_valid: 
+                continue
+            
+            detail_data = scrape_detail_page(driver, clean_url)
+            
+            # 고유 ID 생성
+            import time
+            timestamp = int(time.time() * 1000) % 1000000
+            safe_id = f"popga_{i:03d}_{timestamp:06d}"
+            
+            final_popup = {
+                'id': safe_id,
+                'popup_name': popup.get('title', ''),
+                'detailed_address': detail_data['detailed_address'] or popup.get('location', ''),
+                'category': popup.get('category', ''),
+                'status': popup.get('status', ''),
+                'popup_date': detail_data['detailed_period'] or popup.get('period', ''),
+                'detail_link': clean_url,
+                'notice': detail_data['notice'],
+                'visit_events': detail_data['visit_events'],
+                'on_site_events': detail_data['on_site_events'],
+                'purchase_events': detail_data['purchase_events'],
+                'geo_x': '', 'geo_y': '', 'geo_validated': False
+            }
+            
+            # 네이버 지오코드
+            if naver_client_id and naver_client_secret and final_popup['detailed_address']:
+                print(f"  🗺️  {final_popup['detailed_address'][:40]}...")
+                geo_result = geocode_naver_map(final_popup['detailed_address'], 
+                                             naver_client_id, naver_client_secret)
+                if geo_result.get('validated'):
+                    final_popup.update({
+                        'geo_x': geo_result.get('x'),
+                        'geo_y': geo_result.get('y'),
+                        'geo_validated': True
+                    })
+                    print(f"  ✅ {geo_result.get('x')[:10]},{geo_result.get('y')[:10]}")
+            
+            validated_popups.append(final_popup)
+            
+        except Exception as e:
+            print(f"❌ [{i}/{total_count}] 처리 실패: {str(e)[:50]}")
+            continue
+    
+    driver.quit()
+    
+    # DB 저장 (지오코드 성공한 데이터만)
+    if db_conn:
+        geo_success = [p for p in validated_popups if p.get('geo_validated')]
+        if geo_success:
+            try:
+                engine = create_engine(os.getenv('DATABASE_URL'))
+                pd.DataFrame(geo_success).to_sql('popga_popups', engine, 
+                                               if_exists='append', index=False)
+                print(f"💾 DB 저장: {len(geo_success)}개")
+            except Exception as e:
+                print(f"⚠️ DB 저장 실패: {e}")
+    
+    # CSV/JSON 저장
+    df = pd.DataFrame(validated_popups)
+    df.to_csv("popga_detailed_popups.csv", index=False, encoding='utf-8-sig')
+    with open("popga_detailed_popups.json", "w", encoding="utf-8") as f:
+        json.dump(validated_popups, f, ensure_ascii=False, indent=2)
+    
+    print(f"\n✅ 최종 완료: {len(validated_popups)}개")
+    return validated_popups
 
-# 🚀 실행
+def save_to_postgres(validated_popups):
+    """DB 저장 (호출 안함 - process_and_validate_popups에서 처리)"""
+    pass
+
 if __name__ == "__main__":
-    print("🎪 팝가 팝업스토어 크롤링 + PostgreSQL 저장 시작!")
-    print(f"🔍 DATABASE_URL: {'설정됨' if os.getenv('DATABASE_URL') else '없음 (LOCAL_DB 사용)'}")
+    print("🎪 팝가 팝업 완전 크롤링 시작!")
+    print("=" * 60)
     
-    # 크롤링 실행
-    popups = crawl_popga_popups()
-    
-    if popups:
-        # 1. CSV 저장
-        df = pd.DataFrame(popups)
-        df.to_csv("popga_popups.csv", index=False, encoding='utf-8-sig')
-        print(f"💾 {len(popups)}개 팝업을 popga_popups.csv에 저장!")
+    raw_popups = crawl_popga_popups()
+    if raw_popups:
+        validated_popups = process_and_validate_popups(raw_popups)
         
-        # 2. JSON 저장
-        with open("popga_popups.json", "w", encoding="utf-8") as f:
-            json.dump(popups, f, ensure_ascii=False, indent=2)
-        print("💾 JSON 파일도 저장 완료!")
+        print("\n📊 최종 통계:")
+        df = pd.DataFrame(validated_popups)
+        print(f"  💾 총 {len(validated_popups)}개")
+        print(f"  🗺️  지오코딩: {df['geo_validated'].sum()}개")
+        print(f"  📍 서울: {(df['detailed_address'].str.contains('서울', na=False)).sum()}개")
         
-        # 3. PostgreSQL 저장
-        save_to_postgres(popups)
-        
-        # 결과 출력
-        print("\n📋 최종 결과 미리보기:")
-        print(df.head().to_string(index=False))
+        print("\n📋 미리보기:")
+        display_cols = ['popup_name', 'detailed_address', 'popup_date', 'opening_hours', 
+                       'visit_events', 'purchase_events', 'geo_validated']
+        available_cols = [col for col in display_cols if col in df.columns]
+        print(df[available_cols].head(3).to_string(index=False))
     else:
-        print("😞 데이터 수집 실패. 네트워크나 사이트 변경 확인하세요.")
+        print("❌ 리스트 크롤링 실패")
