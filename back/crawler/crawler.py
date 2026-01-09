@@ -108,6 +108,7 @@ def create_table(conn):
         visit_events TEXT,
         on_site_events TEXT,
         purchase_events TEXT,
+        other_events TEXT, 
         geo_x VARCHAR(20),
         geo_y VARCHAR(20),
         geo_validated BOOLEAN DEFAULT FALSE,
@@ -139,10 +140,9 @@ def scrape_detail_page(driver, detail_url):
                 "//h3[contains(text(),'일정')]/following::p[contains(@class,'font-bold')][1]")[0].text.strip()
         except: pass
         
-        # 운영시간 (엄격 필터링)
+        # 운영시간
         hours_elems = driver.find_elements(By.XPATH, 
             "//h3[contains(text(),'일정')]/following::p[not(contains(@class,'font-bold'))][position()<4]")
-        
         opening_hours_list = []
         for elem in hours_elems:
             text = elem.text.strip()
@@ -151,48 +151,89 @@ def scrape_detail_page(driver, detail_url):
                 any(x in text for x in ['[브랜드', '[팝업', '[추천', '[실시간', '[주차']) or
                 len(text) > 30):
                 continue
-            
             if (re.search(r'[0-2]?[0-9]:[0-5][0-9]\s*~', text) or 
                 re.search(r'(월|화|수|목|금|토|일).*?[0-2]?[0-9]:[0-5][0-9]', text)):
                 opening_hours_list.append(text)
-        
         opening_hours = ' | '.join(opening_hours_list)
         
         # 공지사항
         notice = ''
         try:
             notice_elems = driver.find_elements(By.XPATH, 
-                "//h3[contains(text(),'공지사항')]/following::p[contains(@class,'whitespace-pre-line')]"
-                "//p[contains(text(),'📢') or starts-with(text(),'📢')]")
+                "//h3[contains(text(),'공지사항')]/following::div[contains(@class,'border')]"
+                "//p[contains(text(),'📢')] | "
+                "//h3[contains(text(),'공지사항')]/following::p[contains(text(),'📢')]"
+            )
             if notice_elems:
                 notice = ' | '.join([e.text.strip() for e in notice_elems[:3]])
         except: pass
         
-        # 혜택 3분류 (방문/현장/구매)
-        visit_events = on_site_events = purchase_events = ''
-        benefit_btns = driver.find_elements(By.XPATH, 
-            "//h3[contains(text(),'혜택')]/following::button[contains(@class,'rounded-full') or contains(@id,'btn-benefit')]")
-        benefit_descs = driver.find_elements(By.XPATH, 
-            "//h3[contains(text(),'혜택')]/following::div[contains(@class,'border')]//p[contains(@class,'text-black-800') or contains(@class,'whitespace-pre-line')]")
+        # ================================
+        # 혜택 파싱
+        # ================================
+        visit_events = on_site_events = purchase_events = other_events = ''
         
-        btn_texts = [btn.text.strip() for btn in benefit_btns if btn.text.strip()]
-        desc_text = ' '.join([t.text.strip() for t in benefit_descs[:2]])
+        try:
+            # 혜택 섹션 찾기 (h3[혜택] 다음 article)
+            benefit_article = driver.find_element(By.XPATH, 
+                "//h3[contains(text(),'혜택')]/ancestor::article | "
+                "//h3[contains(text(),'혜택')]/following::article[1]")
+            print("  🎁 혜택 섹션 발견")
+            
+            # 버튼들 찾기 (rounded-full, SNS 인증, 구매 고객, 기타)
+            benefit_buttons = benefit_article.find_elements(By.XPATH, 
+                ".//button[contains(@class,'rounded-full') or "
+                "contains(@id,'btn-benefit') or "
+                "contains(text(),'SNS') or contains(text(),'구매') or contains(text(),'기타') or "
+                "contains(text(),'인증') or contains(text(),'고객')]")
+            
+            # 설명 div 찾기 (버튼들 다음 whitespace-pre-line)
+            benefit_desc_div = benefit_article.find_elements(By.XPATH, 
+                ".//div[contains(@class,'whitespace-pre-line') and "
+                "contains(@class,'border') and contains(@class,'text-black-800')]")
+            
+            print(f"    📋 버튼: {len(benefit_buttons)}, 설명: {len(benefit_desc_div)}")
+            
+            # 버튼 순회하며 분류
+            for btn in benefit_buttons:
+                btn_text = btn.text.strip()
+                if not btn_text: continue
+                
+                print(f"    🔘 발견: '{btn_text}'")
+                
+                # 버튼의 active 상태 확인 (bg-black-800 = 현재 선택된 탭)
+                is_active = 'bg-black-800' in btn.get_attribute('class') or 'text-black-100' in btn.get_attribute('class')
+                
+                # 설명 텍스트 가져오기
+                desc_text = ''
+                if benefit_desc_div:
+                    desc_text = benefit_desc_div[0].text.strip()[:200]
+                
+                benefit_info = f"{btn_text}: {desc_text}"
+                
+                # 4분류로 분류
+                btn_lower = btn_text.lower()
+                if any(x in btn_lower for x in ['sns', '인증']):
+                    visit_events = benefit_info
+                    print(f"    👤 방문 혜택: {benefit_info[:50]}")
+                elif any(x in btn_lower for x in ['구매', '고객']):
+                    purchase_events = benefit_info
+                    print(f"    🛒 구매 혜택: {benefit_info[:50]}")
+                elif any(x in btn_lower for x in ['기타']):
+                    other_events = benefit_info
+                    print(f"    📦 기타 혜택: {benefit_info[:50]}")
+                elif any(x in btn_lower for x in ['현장', '체험', '포토']):
+                    on_site_events = benefit_info
+                    print(f"    🎁 현장 혜택: {benefit_info[:50]}")
+                    
+        except Exception as e:
+            print(f"  ⚠️ 혜택 파싱 에러: {str(e)[:50]}")
         
-        for btn_text in btn_texts:
-            btn_lower = btn_text.lower()
-            if any(x in btn_lower for x in ['sns', '인증', '방문']):
-                visit_events = f"{btn_text}: {desc_text[:150]}"
-            elif any(x in btn_lower for x in ['현장', '체험', '포토']):
-                on_site_events = f"{btn_text}: {desc_text[:150]}"
-            elif any(x in btn_lower for x in ['구매', '고객']):
-                purchase_events = f"{btn_text}: {desc_text[:150]}"
-        
-        print(f"    📍 {detailed_address[:40]}")
-        print(f"    📅 {detailed_period[:40]}")
-        print(f"    🕒 {opening_hours or '없음'}")
+        # 로그 출력
         print(f"    👤 방문: {visit_events[:30] or '없음'}...")
         print(f"    🎁 현장: {on_site_events[:30] or '없음'}...")
         print(f"    🛒 구매: {purchase_events[:30] or '없음'}...")
+        print(f"    📦 기타: {other_events[:30] or '없음'}...")
         print("    ✅")
         
         return {
@@ -202,13 +243,16 @@ def scrape_detail_page(driver, detail_url):
             'notice': notice,
             'visit_events': visit_events,
             'on_site_events': on_site_events,
-            'purchase_events': purchase_events
+            'purchase_events': purchase_events,
+            'other_events': other_events
         }
+        
     except Exception as e:
-        print(f"    ❌ {str(e)[:50]}")
+        print(f"    ❌ 전체 에러: {str(e)[:50]}")
         return {
             'detailed_address': '', 'detailed_period': '', 'opening_hours': '',
-            'notice': '', 'visit_events': '', 'on_site_events': '', 'purchase_events': ''
+            'notice': '', 'visit_events': '', 'on_site_events': '', 
+            'purchase_events': '', 'other_events': ''
         }
 
 def crawl_popga_popups():
@@ -319,6 +363,7 @@ def process_and_validate_popups(raw_popups):
                 'visit_events': detail_data['visit_events'],
                 'on_site_events': detail_data['on_site_events'],
                 'purchase_events': detail_data['purchase_events'],
+                'other_events': detail_data.get('other_events', ''),
                 'geo_x': '', 'geo_y': '', 'geo_validated': False
             }
             
