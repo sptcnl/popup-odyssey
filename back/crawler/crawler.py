@@ -12,9 +12,40 @@ import os
 import re
 from dotenv import load_dotenv
 import requests
+import urllib.request
+from urllib.parse import urlparse, unquote
+import hashlib
+
 
 # 환경변수 로드
 load_dotenv('/app/.env')
+
+
+def download_popup_image(img_url, popup_name, base_path="/app/data/images"):
+    """팝업 대표 이미지 다운로드"""
+    if not img_url:
+        return None
+    
+    try:
+        # 디렉토리 생성
+        os.makedirs(base_path, exist_ok=True)
+        
+        # 파일명 생성 (popup_name + 해시)
+        name_hash = hashlib.md5(popup_name.encode()).hexdigest()[:8]
+        safe_name = re.sub(r'[^\w\s-]', '', popup_name)[:30].strip()
+        filename = f"{safe_name}_{name_hash}.webp"
+        image_path = os.path.join(base_path, filename)
+        
+        # 이미지 다운로드
+        print(f"    🖼️  이미지 다운로드: {filename}")
+        urllib.request.urlretrieve(img_url, image_path)
+        print(f"    ✅ 이미지 저장: {image_path}")
+        
+        return image_path
+    except Exception as e:
+        print(f"    ❌ 이미지 다운 실패: {str(e)[:30]}")
+        return None
+
 
 def validate_url(url):
     """URL 유효성 검사 및 정규화"""
@@ -40,6 +71,7 @@ def validate_url(url):
         return False, ""
     except:
         return False, ""
+
 
 def geocode_naver_map(address, client_id, client_secret):
     """네이버 지오코드 API"""
@@ -72,6 +104,7 @@ def geocode_naver_map(address, client_id, client_secret):
     except:
         return {'validated': False}
 
+
 def create_driver():
     """Chrome 드라이버 생성 (Headless)"""
     chrome_options = Options()
@@ -84,6 +117,7 @@ def create_driver():
     service = Service("/usr/local/bin/chromedriver")
     return webdriver.Chrome(service=service, options=chrome_options)
 
+
 def get_db_connection():
     """DB 연결"""
     database_url = os.getenv('DATABASE_URL')
@@ -92,6 +126,7 @@ def get_db_connection():
         return engine.raw_connection()
     return None
 
+
 def create_table(conn):
     """테이블 생성"""
     cursor = conn.cursor()
@@ -99,6 +134,8 @@ def create_table(conn):
     CREATE TABLE IF NOT EXISTS popga_popups (
         id VARCHAR(50) PRIMARY KEY,
         popup_name VARCHAR(500),
+        image_url TEXT,
+        image_path TEXT,
         detailed_address TEXT,
         category VARCHAR(100),
         status VARCHAR(50),
@@ -119,13 +156,41 @@ def create_table(conn):
     cursor.close()
     print("✅ 테이블 생성 완료")
 
+
 def scrape_detail_page(driver, detail_url):
-    """상세 페이지 크롤링"""
+    """상세 페이지 크롤링 - 이미지 정확히 수정 + 혜택 파싱 개선"""
     try:
         print(f"  🔍 {detail_url}")
         driver.get(detail_url)
         time.sleep(4)
-        
+
+        # ===== 대표 이미지 추출 (정확한 XPath) =====
+        image_url = ''
+        try:
+            # 1순위: btn-magnify-popup-image 내부 img (가장 확실함)
+            try:
+                img_elem = driver.find_element(By.XPATH, "//button[@id='btn-magnify-popup-image']//img[1]")
+                image_url = img_elem.get_attribute('src')
+            except:
+                # 2순위: aspect-[4/5] 클래스 내부 첫 번째 img
+                img_elems = driver.find_elements(By.XPATH, "//div[contains(@class,'aspect-[4/5]')]//img")
+                if img_elems:
+                    image_url = img_elems[0].get_attribute('src')
+            
+            # 3순위: 메인 섹션 첫 번째 대표 이미지
+            if not image_url:
+                img_elems = driver.find_elements(By.XPATH, "//section//img[contains(@src,'thumbnail.webp')][1]")
+                if img_elems:
+                    image_url = img_elems[0].get_attribute('src')
+            
+            if image_url:
+                print(f"    🖼️  대표 이미지: {image_url[-50:]}")
+            else:
+                print("    ⚠️  대표 이미지 없음")
+                
+        except Exception as e:
+            print(f"    ⚠️  이미지 추출 에러: {str(e)[:30]}")
+
         # 주소
         detailed_address = ''
         try:
@@ -169,65 +234,62 @@ def scrape_detail_page(driver, detail_url):
         except: pass
         
         # ================================
-        # 혜택 파싱
+        # 혜택 파싱 - 개선된 버전
         # ================================
         visit_events = on_site_events = purchase_events = other_events = ''
         
         try:
-            # 혜택 섹션 찾기 (h3[혜택] 다음 article)
-            benefit_article = driver.find_element(By.XPATH, 
-                "//h3[contains(text(),'혜택')]/ancestor::article | "
-                "//h3[contains(text(),'혜택')]/following::article[1]")
-            print("  🎁 혜택 섹션 발견")
+            print("  🎁 혜택 섹션 탐색 중...")
             
-            # 버튼들 찾기 (rounded-full, SNS 인증, 구매 고객, 기타)
-            benefit_buttons = benefit_article.find_elements(By.XPATH, 
-                ".//button[contains(@class,'rounded-full') or "
-                "contains(@id,'btn-benefit') or "
-                "contains(text(),'SNS') or contains(text(),'구매') or contains(text(),'기타') or "
-                "contains(text(),'인증') or contains(text(),'고객')]")
+            # rounded-full 버튼들 우선 찾기 (가장 정확)
+            benefit_buttons = driver.find_elements(By.XPATH, 
+                "//h3[contains(text(),'혜택')]/following::button[contains(@class,'rounded-full')]"
+            )
             
-            # 설명 div 찾기 (버튼들 다음 whitespace-pre-line)
-            benefit_desc_div = benefit_article.find_elements(By.XPATH, 
-                ".//div[contains(@class,'whitespace-pre-line') and "
-                "contains(@class,'border') and contains(@class,'text-black-800')]")
+            # 더 넓은 범위에서 버튼 찾기
+            if not benefit_buttons:
+                benefit_buttons = driver.find_elements(By.XPATH, 
+                    "//h3[contains(text(),'혜택')]/following::button[1][position()<=10]"
+                )
             
-            print(f"    📋 버튼: {len(benefit_buttons)}, 설명: {len(benefit_desc_div)}")
+            print(f"    📋 버튼: {len(benefit_buttons)}개 발견")
             
-            # 버튼 순회하며 분류
-            for btn in benefit_buttons:
+            # 각 버튼 처리
+            for i, btn in enumerate(benefit_buttons):
                 btn_text = btn.text.strip()
-                if not btn_text: continue
+                if not btn_text or len(btn_text) < 2: 
+                    continue
                 
-                print(f"    🔘 발견: '{btn_text}'")
+                print(f"    🔘 [{i+1}] '{btn_text}'")
                 
-                # 버튼의 active 상태 확인 (bg-black-800 = 현재 선택된 탭)
-                is_active = 'bg-black-800' in btn.get_attribute('class') or 'text-black-100' in btn.get_attribute('class')
-                
-                # 설명 텍스트 가져오기
-                desc_text = ''
-                if benefit_desc_div:
-                    desc_text = benefit_desc_div[0].text.strip()[:200]
+                # 각 버튼 다음 설명 찾기
+                desc_elems = driver.find_elements(By.XPATH, 
+                    f"//button[contains(text(),'{btn_text}')]/following::div[contains(@class,'whitespace-pre-line')][1]"
+                )
+                desc_text = desc_elems[0].text.strip()[:150] if desc_elems else f"설명없음({i+1})"
                 
                 benefit_info = f"{btn_text}: {desc_text}"
+                print(f"    📝 '{btn_text}' → '{desc_text[:30]}...'")
                 
-                # 4분류로 분류
+                # 4분류
                 btn_lower = btn_text.lower()
-                if any(x in btn_lower for x in ['sns', '인증']):
+                if any(x in btn_lower for x in ['방문']):
                     visit_events = benefit_info
-                    print(f"    👤 방문 혜택: {benefit_info[:50]}")
-                elif any(x in btn_lower for x in ['구매', '고객']):
-                    purchase_events = benefit_info
-                    print(f"    🛒 구매 혜택: {benefit_info[:50]}")
-                elif any(x in btn_lower for x in ['기타']):
-                    other_events = benefit_info
-                    print(f"    📦 기타 혜택: {benefit_info[:50]}")
-                elif any(x in btn_lower for x in ['현장', '체험', '포토']):
+                    print(f"    👤 방문 → ✅")
+                elif any(x in btn_lower for x in ['현장', '체험', '포토', '이벤트', 'sns', '인증']):
                     on_site_events = benefit_info
-                    print(f"    🎁 현장 혜택: {benefit_info[:50]}")
-                    
+                    print(f"    🎁 현장 → ✅")
+                elif any(x in btn_lower for x in ['구매', '고객', '할인', '결제']):
+                    purchase_events = benefit_info
+                    print(f"    🛒 구매 → ✅")
+                elif any(x in btn_lower for x in ['기타', '주차', '예약']):
+                    other_events = benefit_info
+                    print(f"    📦 기타 → ✅")
+                else:
+                    print(f"    ❓ 분류불가: {btn_lower}")
+            
         except Exception as e:
-            print(f"  ⚠️ 혜택 파싱 에러: {str(e)[:50]}")
+            print(f"  ⚠️ 혜택 파싱 실패: {str(e)[:50]}")
         
         # 로그 출력
         print(f"    👤 방문: {visit_events[:30] or '없음'}...")
@@ -244,7 +306,9 @@ def scrape_detail_page(driver, detail_url):
             'visit_events': visit_events,
             'on_site_events': on_site_events,
             'purchase_events': purchase_events,
-            'other_events': other_events
+            'other_events': other_events,
+            'image_url': image_url,
+            'image_path': ''
         }
         
     except Exception as e:
@@ -252,11 +316,13 @@ def scrape_detail_page(driver, detail_url):
         return {
             'detailed_address': '', 'detailed_period': '', 'opening_hours': '',
             'notice': '', 'visit_events': '', 'on_site_events': '', 
-            'purchase_events': '', 'other_events': ''
+            'purchase_events': '', 'other_events': '',
+            'image_url': '', 'image_path': ''
         }
 
+
 def crawl_popga_popups():
-    """팝가 리스트 크롤링"""
+    """팝가 리스트 크롤링 - 수정된 선택자"""
     driver = None
     try:
         driver = create_driver()
@@ -264,19 +330,30 @@ def crawl_popga_popups():
         
         print("🚀 리스트 접속...")
         driver.get(url)
-        WebDriverWait(driver, 20).until_not(EC.presence_of_element_located((By.CSS_SELECTOR, ".spinner")))
-        time.sleep(3)
         
+        # 로딩 대기 개선
+        try:
+            WebDriverWait(driver, 20).until_not(EC.presence_of_element_located((By.CSS_SELECTOR, ".spinner")))
+        except:
+            print("  ⚠️ spinner 없음, 일반 대기")
+        time.sleep(5)
+        
+        # 무한 스크롤
         print("📜 무한 스크롤...")
         last_height = driver.execute_script("return document.body.scrollHeight")
         for _ in range(5):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
+            time.sleep(3)
             new_height = driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height: break
+            if new_height == last_height: 
+                break
             last_height = new_height
         
-        articles = driver.find_elements(By.CSS_SELECTOR, "article.relative")
+        # 더 유연한 리스트 아이템 찾기
+        articles = driver.find_elements(By.CSS_SELECTOR, "article.relative, article[class*='relative'], div[role='article']")
+        if not articles:
+            articles = driver.find_elements(By.XPATH, "//a[contains(@href,'/popup/')]/ancestor::article | //a[contains(@href,'/popup/')]/parent::*")
+        
         print(f"✅ {len(articles)}개 팝업 발견")
         
         popup_data = []
@@ -285,15 +362,29 @@ def crawl_popga_popups():
                 article = articles[idx]
                 i = idx + 1
                 
-                link_elem = article.find_element(By.CSS_SELECTOR, "a")
+                # 링크 찾기
+                link_elems = article.find_elements(By.CSS_SELECTOR, "a")
+                if not link_elems:
+                    continue
+                link_elem = link_elems[0]
                 link = link_elem.get_attribute("href")
                 url_valid, clean_url = validate_url(link or "")
                 
-                title = article.find_element(By.CSS_SELECTOR, "p.line-clamp-1").text.strip()
-                category = article.find_element(By.CSS_SELECTOR, "span.rounded.bg-black-200").text.strip()
-                location = article.find_element(By.CSS_SELECTOR, "p.text-black-600").text.strip()
-                status = article.find_element(By.CSS_SELECTOR, "p.text-black-500").text.strip()
-                period = article.find_element(By.CSS_SELECTOR, "p.text-xs.text-black-500").text.strip()
+                # 기본 정보
+                title_elems = article.find_elements(By.CSS_SELECTOR, "p.line-clamp-1, h1, h2, h3, [class*='title'], [class*='name']")
+                title = title_elems[0].text.strip() if title_elems else f"팝업_{i}"
+                
+                category_elems = article.find_elements(By.CSS_SELECTOR, "span.rounded.bg-black-200, [class*='category']")
+                category = category_elems[0].text.strip() if category_elems else "미분류"
+                
+                location_elems = article.find_elements(By.CSS_SELECTOR, "p.text-black-600, [class*='location']")
+                location = location_elems[0].text.strip() if location_elems else ""
+                
+                status_elems = article.find_elements(By.CSS_SELECTOR, "p.text-black-500, [class*='status']")
+                status = status_elems[0].text.strip() if status_elems else "운영중"
+                
+                period_elems = article.find_elements(By.CSS_SELECTOR, "p.text-xs.text-black-500, [class*='period']")
+                period = period_elems[0].text.strip() if period_elems else ""
                 
                 if url_valid:
                     popup_data.append({
@@ -304,7 +395,7 @@ def crawl_popga_popups():
                     print(f"  📋 [{i}/{len(articles)}] {title[:30]}...")
                     
             except Exception as e:
-                print(f"  ❌ 리스트 [{i}/{len(articles)}] 스킵")
+                print(f"  ❌ 리스트 [{i}/{len(articles)}] 스킵: {str(e)[:30]}")
                 continue
         
         return popup_data
@@ -315,6 +406,7 @@ def crawl_popga_popups():
     finally:
         if driver:
             driver.quit()
+
 
 def process_and_validate_popups(raw_popups):
     """상세 크롤링 + 지오코딩"""
@@ -345,6 +437,12 @@ def process_and_validate_popups(raw_popups):
                 continue
             
             detail_data = scrape_detail_page(driver, clean_url)
+
+            # ===== 이미지 다운로드 =====
+            image_path = download_popup_image(
+                detail_data.get('image_url'), 
+                popup.get('title', 'unknown')
+            ) if detail_data.get('image_url') else None
             
             # 고유 ID 생성
             import time
@@ -354,6 +452,8 @@ def process_and_validate_popups(raw_popups):
             final_popup = {
                 'id': safe_id,
                 'popup_name': popup.get('title', ''),
+                'image_url': detail_data.get('image_url', ''),
+                'image_path': image_path,
                 'detailed_address': detail_data['detailed_address'] or popup.get('location', ''),
                 'category': popup.get('category', ''),
                 'status': popup.get('status', ''),
@@ -371,7 +471,7 @@ def process_and_validate_popups(raw_popups):
             if naver_client_id and naver_client_secret and final_popup['detailed_address']:
                 print(f"  🗺️  {final_popup['detailed_address'][:40]}...")
                 geo_result = geocode_naver_map(final_popup['detailed_address'], 
-                                             naver_client_id, naver_client_secret)
+                                              naver_client_id, naver_client_secret)
                 if geo_result.get('validated'):
                     final_popup.update({
                         'geo_x': geo_result.get('x'),
@@ -395,7 +495,7 @@ def process_and_validate_popups(raw_popups):
             try:
                 engine = create_engine(os.getenv('DATABASE_URL'))
                 pd.DataFrame(geo_success).to_sql('popga_popups', engine, 
-                                               if_exists='append', index=False)
+                                                if_exists='append', index=False)
                 print(f"💾 DB 저장: {len(geo_success)}개")
             except Exception as e:
                 print(f"⚠️ DB 저장 실패: {e}")
@@ -409,9 +509,6 @@ def process_and_validate_popups(raw_popups):
     print(f"\n✅ 최종 완료: {len(validated_popups)}개")
     return validated_popups
 
-def save_to_postgres(validated_popups):
-    """DB 저장 (호출 안함 - process_and_validate_popups에서 처리)"""
-    pass
 
 if __name__ == "__main__":
     print("🎪 팝가 팝업 완전 크롤링 시작!")
@@ -424,12 +521,13 @@ if __name__ == "__main__":
         print("\n📊 최종 통계:")
         df = pd.DataFrame(validated_popups)
         print(f"  💾 총 {len(validated_popups)}개")
+        print(f"  🖼️  이미지: {df['image_path'].notna().sum()}개")
         print(f"  🗺️  지오코딩: {df['geo_validated'].sum()}개")
         print(f"  📍 서울: {(df['detailed_address'].str.contains('서울', na=False)).sum()}개")
         
         print("\n📋 미리보기:")
-        display_cols = ['popup_name', 'detailed_address', 'popup_date', 'opening_hours', 
-                       'visit_events', 'purchase_events', 'geo_validated']
+        display_cols = ['popup_name', 'image_path', 'detailed_address', 'popup_date', 
+                       'visit_events', 'geo_validated']
         available_cols = [col for col in display_cols if col in df.columns]
         print(df[available_cols].head(3).to_string(index=False))
     else:

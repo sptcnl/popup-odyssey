@@ -41,6 +41,7 @@ services:
     volumes:
       - ./data:/app/data
       - /tmp:/tmp  # 디버그 파일용
+      - ./data/images:/app/data/images
     env_file:
     - ./.env
     restart: unless-stopped
