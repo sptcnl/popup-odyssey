@@ -4,7 +4,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time
+import time, datetime
 import pandas as pd
 import json
 from sqlalchemy import create_engine
@@ -74,9 +74,10 @@ def validate_url(url):
 
 
 def geocode_naver_map(address, client_id, client_secret):
-    """네이버 지오코드 API"""
+    """네이버 지오코드 API → 좌표 튜플 반환 (Point 제거)"""
     if not all([address, client_id, client_secret]):
-        return {'validated': False}
+        print(f"  ❌ 지오코딩 실패: 환경변수 누락 ({address[:20]}...)")
+        return None
     
     url = "https://maps.apigw.ntruss.com/map-geocode/v2/geocode"
     headers = {
@@ -87,23 +88,26 @@ def geocode_naver_map(address, client_id, client_secret):
     params = {"query": address.strip()}
     
     try:
+        print(f"  🗺️  지오코딩 요청: {address[:30]}...")
         response = requests.get(url, headers=headers, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
+        print(f"  📡 응답 상태: {data.get('status')}")
+        
         if data.get('status') == 'OK' and data.get('addresses'):
-            addr_info = data['addresses'][0]
-            if addr_info.get('roadAddress'):
+            coords = data['addresses'][0]
+            if coords.get('x') and coords.get('y'):
                 return {
-                    'road_address': addr_info['roadAddress'],
-                    'x': addr_info.get('x'), 
-                    'y': addr_info.get('y'),
-                    'validated': True
+                    'geo_x': float(coords['x']),  # 경도
+                    'geo_y': float(coords['y'])   # 위도
                 }
-        return {'validated': False}
-    except:
-        return {'validated': False}
-
+        print(f"  ❌ API 실패: {data.get('status', 'Unknown')}")
+        return None
+        
+    except Exception as e:
+        print(f"  ❌ 지오코딩 에러: {str(e)[:50]}")
+        return None
 
 def create_driver():
     """Chrome 드라이버 생성 (Headless)"""
@@ -125,36 +129,6 @@ def get_db_connection():
         engine = create_engine(database_url)
         return engine.raw_connection()
     return None
-
-
-def create_table(conn):
-    """테이블 생성"""
-    cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS popga_popups (
-        id VARCHAR(50) PRIMARY KEY,
-        popup_name VARCHAR(500),
-        image_url TEXT,
-        image_path TEXT,
-        detailed_address TEXT,
-        category VARCHAR(100),
-        status VARCHAR(50),
-        popup_date VARCHAR(100),
-        detail_link TEXT,
-        notice TEXT,
-        visit_events TEXT,
-        on_site_events TEXT,
-        purchase_events TEXT,
-        other_events TEXT, 
-        geo_x VARCHAR(20),
-        geo_y VARCHAR(20),
-        geo_validated BOOLEAN DEFAULT FALSE,
-        crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
-    conn.commit()
-    cursor.close()
-    print("✅ 테이블 생성 완료")
 
 
 def scrape_detail_page(driver, detail_url):
@@ -192,9 +166,9 @@ def scrape_detail_page(driver, detail_url):
             print(f"    ⚠️  이미지 추출 에러: {str(e)[:30]}")
 
         # 주소
-        detailed_address = ''
+        address = ''
         try:
-            detailed_address = driver.find_elements(By.XPATH, 
+            address = driver.find_elements(By.XPATH, 
                 "//h3[contains(text(),'위치')]/following::p[contains(@class,'text-black-800')]")[0].text.strip()
         except: pass
         
@@ -299,7 +273,7 @@ def scrape_detail_page(driver, detail_url):
         print("    ✅")
         
         return {
-            'detailed_address': detailed_address,
+            'address': address,
             'detailed_period': detailed_period,
             'opening_hours': opening_hours,
             'notice': notice,
@@ -314,7 +288,7 @@ def scrape_detail_page(driver, detail_url):
     except Exception as e:
         print(f"    ❌ 전체 에러: {str(e)[:50]}")
         return {
-            'detailed_address': '', 'detailed_period': '', 'opening_hours': '',
+            'address': '', 'detailed_period': '', 'opening_hours': '',
             'notice': '', 'visit_events': '', 'on_site_events': '', 
             'purchase_events': '', 'other_events': '',
             'image_url': '', 'image_path': ''
@@ -411,17 +385,15 @@ def crawl_popga_popups():
 def process_and_validate_popups(raw_popups):
     """상세 크롤링 + 지오코딩"""
     validated_popups = []
-    naver_client_id = os.getenv('NAVER_CLIENT_ID')
-    naver_client_secret = os.getenv('NAVER_CLIENT_SECRET')
+    naver_client_id = os.getenv('NAVER_GEO_CLIENT_ID')
+    naver_client_secret = os.getenv('NAVER_GEO_CLIENT_SECRET')
     driver = create_driver()
     
     db_conn = None
     try:
         db_conn = get_db_connection()
-        if db_conn:
-            create_table(db_conn)
     except:
-        print("⚠️ DB 연결 생략")
+        print("⚠️ DB 연결 실패")
         db_conn = None
     
     total_count = len(raw_popups)
@@ -454,7 +426,7 @@ def process_and_validate_popups(raw_popups):
                 'popup_name': popup.get('title', ''),
                 'image_url': detail_data.get('image_url', ''),
                 'image_path': image_path,
-                'detailed_address': detail_data['detailed_address'] or popup.get('location', ''),
+                'address': detail_data['address'] or popup.get('location', ''),
                 'category': popup.get('category', ''),
                 'status': popup.get('status', ''),
                 'popup_date': detail_data['detailed_period'] or popup.get('period', ''),
@@ -464,21 +436,21 @@ def process_and_validate_popups(raw_popups):
                 'on_site_events': detail_data['on_site_events'],
                 'purchase_events': detail_data['purchase_events'],
                 'other_events': detail_data.get('other_events', ''),
-                'geo_x': '', 'geo_y': '', 'geo_validated': False
+                'location': None,  # Point 객체 또는 None
+                'geo_validated': False,
+                'crawled_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             }
-            
-            # 네이버 지오코드
-            if naver_client_id and naver_client_secret and final_popup['detailed_address']:
-                print(f"  🗺️  {final_popup['detailed_address'][:40]}...")
-                geo_result = geocode_naver_map(final_popup['detailed_address'], 
-                                              naver_client_id, naver_client_secret)
-                if geo_result.get('validated'):
-                    final_popup.update({
-                        'geo_x': geo_result.get('x'),
-                        'geo_y': geo_result.get('y'),
-                        'geo_validated': True
-                    })
-                    print(f"  ✅ {geo_result.get('x')[:10]},{geo_result.get('y')[:10]}")
+
+            # 네이버 지오코드 결과 처리
+            geo_result = geocode_naver_map(final_popup['address'], 
+                                        naver_client_id, naver_client_secret)
+            if geo_result:
+                final_popup.update({
+                    'geo_x': geo_result['geo_x'],
+                    'geo_y': geo_result['geo_y'],
+                    'geo_validated': True
+                })
+                print(f"  ✅ 좌표: X={geo_result['geo_x']:.6f}, Y={geo_result['geo_y']:.6f}")
             
             validated_popups.append(final_popup)
             
@@ -523,10 +495,10 @@ if __name__ == "__main__":
         print(f"  💾 총 {len(validated_popups)}개")
         print(f"  🖼️  이미지: {df['image_path'].notna().sum()}개")
         print(f"  🗺️  지오코딩: {df['geo_validated'].sum()}개")
-        print(f"  📍 서울: {(df['detailed_address'].str.contains('서울', na=False)).sum()}개")
+        print(f"  📍 서울: {(df['address'].str.contains('서울', na=False)).sum()}개")
         
         print("\n📋 미리보기:")
-        display_cols = ['popup_name', 'image_path', 'detailed_address', 'popup_date', 
+        display_cols = ['popup_name', 'image_path', 'address', 'popup_date', 
                        'visit_events', 'geo_validated']
         available_cols = [col for col in display_cols if col in df.columns]
         print(df[available_cols].head(3).to_string(index=False))
