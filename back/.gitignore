@@ -1,3 +1,7 @@
+data
+debug
+static
+
 ### Django ###
 *.log
 *.pot
