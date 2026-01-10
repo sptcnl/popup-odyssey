@@ -1,11 +1,12 @@
 FROM python:3.11-slim-bookworm
 
-# 시스템 의존성 + Chrome 완전 설치 (Selenium 최적화)
+# 시스템 의존성 + locales 추가 (핵심 수정)
 RUN apt-get update && apt-get install -y \
     wget gnupg unzip curl \
     chromium \
     cron \
     tzdata \
+    locales \
     fonts-liberation \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -41,42 +42,58 @@ RUN apt-get update && apt-get install -y \
     libxtst6 \
     lsb-release \
     xdg-utils \
+    xvfb \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /var/log /app/data /tmp
 
-# ChromeDriver 143 정확한 경로로 설치 (오류 수정)
+# ChromeDriver 143 설치 (고정 버전)
 RUN wget -O /tmp/chromedriver.zip \
-    https://storage.googleapis.com/chrome-for-testing-public/143.0.7499.169/linux64/chromedriver-linux64.zip && \
+    "https://storage.googleapis.com/chrome-for-testing-public/143.0.7499.169/linux64/chromedriver-linux64.zip" && \
     unzip /tmp/chromedriver.zip -d /tmp/ && \
     mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver && \
     chmod +x /usr/local/bin/chromedriver && \
-    rm -rf /tmp/chromedriver*
+    rm -rf /tmp/chromedriver* /tmp/chromedriver-linux64
 
-# KST 시간대 설정
-RUN ln -sf /usr/share/zoneinfo/Asia/Seoul /etc/localtime \
-    && echo "Asia/Seoul" > /etc/timezone
+# KST 시간대 + 한국어 환경 (locale-gen 오류 수정)
+RUN ln -sf /usr/share/zoneinfo/Asia/Seoul /etc/localtime && \
+    echo "Asia/Seoul" > /etc/timezone && \
+    sed -i 's/^# *\(ko_KR.UTF-8\)/\1/' /etc/locale.gen && \
+    locale-gen && \
+    echo "LANG=ko_KR.UTF-8" > /etc/environment && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Python 의존성 설치
+# Python 의존성
 COPY crawler/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # 소스코드 복사
-COPY crawler/crawler.py .
-RUN chmod +x crawler.py
+COPY crawler/ .
+RUN chmod +x crawler.py food_scrap.py
 
-# 크론탭 설정 (매일 오전 9시 + 로그 로테이션)
-RUN echo "0 9 * * * /usr/local/bin/python /app/crawler.py >> /var/log/crawler.log 2>&1" | crontab - \
-    && echo "0 0 * * * find /var/log -name 'crawler.log.*' -mtime +7 -delete" | crontab -
+# 로그 + 권한 설정
+RUN touch /var/log/crawler.log /var/log/food_scrap.log && \
+    chmod 666 /var/log/crawler.log /var/log/food_scrap.log
 
-# 로그 파일 권한 설정
-RUN touch /var/log/crawler.log && chmod 666 /var/log/crawler.log
+# 크론탭 (중복 제거 + 안전 설정)
+RUN echo "SHELL=/bin/bash" > /tmp/crontab && \
+    echo "0 9 * * * /usr/local/bin/python /app/crawler.py >> /var/log/crawler.log 2>&1" >> /tmp/crontab && \
+    echo "0 9 * * 1 cd /app && /usr/local/bin/python food_scrap.py >> /var/log/food_scrap.log 2>&1" >> /tmp/crontab && \
+    echo "0 0 * * * find /var/log -name '*.log.*' -mtime +7 -delete 2>/dev/null" >> /tmp/crontab && \
+    crontab /tmp/crontab && rm /tmp/crontab
 
-# 헬스체크
-HEALTHCHECK --interval=1h --timeout=30s --start-period=5m --retries=3 \
-    CMD ps aux | grep '[c]ron' || exit 1
+# 시작 스크립트
+RUN echo '#!/bin/bash\n\
+echo "Starting cron at $(date)"\n\
+service cron start\n\
+echo "Cron started. Monitoring logs..."\n\
+tail -F /var/log/crawler.log /var/log/food_scrap.log /var/log/cron.log 2>/dev/null | head -n 100' > /start.sh && \
+    chmod +x /start.sh
+
+HEALTHCHECK --interval=2h --timeout=30s --start-period=5m --retries=3 \
+    CMD pgrep cron >/dev/null || exit 1
 
 EXPOSE 8080
-
-CMD cron && tail -f /var/log/crawler.log
+CMD ["/start.sh"]
