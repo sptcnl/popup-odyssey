@@ -1,4 +1,4 @@
-FROM continuumio/miniconda3
+FROM mambaorg/micromamba:latest
 WORKDIR /app
 
 # OS 레벨 GDAL 설치
