@@ -4,7 +4,6 @@ from django.db import models
 
 class User(AbstractUser):
     email = models.EmailField(max_length=254, unique=True)
-    nickname = models.CharField(max_length=50)
     role = models.CharField(max_length=20, default='USER')
     is_active = models.BooleanField(default=True)
     provider = models.CharField(max_length=20, null=True, blank=True)
