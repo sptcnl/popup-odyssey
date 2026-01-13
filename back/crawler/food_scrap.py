@@ -9,8 +9,8 @@ from sqlalchemy import create_engine
 
 load_dotenv('/app/.env')
 
-client_id = "DoBZ6S3cPiPVVsfQrhiJ"
-client_secret = "eyV7XvqlI2"
+client_id = os.getenv("NAVER_GEO_CLIENT_ID")
+client_secret = os.getenv("NAVER_GEO_CLIENT_SECRET")
 
 def naver_local_search(query, display=10, start=1):
     """모든 컬럼 포함한 API 호출"""
