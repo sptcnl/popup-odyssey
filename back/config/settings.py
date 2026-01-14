@@ -106,6 +106,14 @@ DATABASES = {
 }
 
 
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',  # 메모리 캐싱
+        'LOCATION': 'unique-snowflake',
+    }
+}
+
+
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
@@ -161,7 +169,7 @@ REST_FRAMEWORK = {
         # Any other parsers
     ),
     'DEFAULT_PERMISSION_CLASSES': (
-    'rest_framework.permissions.IsAuthenticated',
+    'rest_framework.permissions.AllowAny',
     ),
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -184,4 +192,49 @@ SPECTACULAR_SETTINGS = {
     },
     'SERVE_INCLUDE_SCHEMA': False,
     'SWAGGER_UI_DIST': '//unpkg.com/swagger-ui-dist@3.38.0',
+}
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module}:{funcName} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'DEBUG',  # ✅ 명시적 DEBUG 레벨
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'level': 'INFO',   # ✅ 명시적 레벨 추가
+            'class': 'logging.FileHandler',
+            'filename': '/tmp/django.log',  # ✅ 절대경로
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],  # ✅ 콘솔 기본
+        'level': 'INFO',
+    },
+    'loggers': {
+        'apps.routes.views': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',  # ✅ DEBUG 레벨
+            'propagate': True,  # ✅ 상위로 전파!
+        },
+        # Django 기본 로그도 보이게
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+    },
 }
