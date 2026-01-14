@@ -25,7 +25,8 @@ class Place(models.Model):
         geography=True
     )
     status = models.CharField(max_length=50, null=True, blank=True)
-    popup_date = models.CharField(max_length=100, null=True, blank=True)
+    start_date = models.DateField(max_length=100, null=True, blank=True)
+    end_date = models.DateField(max_length=100, null=True, blank=True)
     geo_x = models.FloatField(null=True, blank=True)  # 경도 (longitude)
     geo_y = models.FloatField(null=True, blank=True)  # 위도 (latitude)
     geo_validated = models.BooleanField(default=False)
