@@ -1,6 +1,7 @@
 data
 debug
 static
+*.csv
 
 ### Django ###
 *.log
