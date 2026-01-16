@@ -14,3 +14,4 @@ pandas==2.1.4
 requests==2.28
 ortools==9.8.3296
 SQLAlchemy==2.0.35
+Pillow==12.1.0

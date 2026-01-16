@@ -16,7 +16,7 @@ class Place(models.Model):
     user = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='places', null=True, blank=True)
     is_public = models.BooleanField(default=True)
     name = models.CharField(max_length=100)
-    image_path = models.TextField(null=True, blank=True)
+    image = models.ImageField(null=True, blank=True)
     address = models.CharField(max_length=200)
     location = gis_models.PointField(
         srid=4326,
