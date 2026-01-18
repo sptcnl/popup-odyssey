@@ -1,0 +1,161 @@
+import { useEffect, useRef } from 'react'
+
+export default function MapView({ popups, selectedIds, onSelect, routeData }) {
+  const mapRef = useRef(null)
+  const mapInstance = useRef(null)
+  const markers = useRef([])
+  const routeLayer = useRef(null)
+  const logoRef = useRef(null)
+
+  // 지도 초기화
+  useEffect(() => {
+    if (!window.L) return
+
+    mapInstance.current = window.L.map(mapRef.current).setView([37.5445, 127.0557], 13)
+
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+    }).addTo(mapInstance.current)
+
+    // 로고
+    const timer = setTimeout(() => {
+      if (mapRef.current && !logoRef.current) {
+        const logoDiv = document.createElement('div')
+        logoDiv.style.cssText = `
+          position: absolute; top: 10px; left: 10px; z-index: 1000;
+          width: 120px; height: 36px; margin: 5px;
+          background: #000000; border-radius: 10px;
+          display: flex; align-items: center; justify-content: center;
+          color: white; font-weight: 700; font-size: 11px;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+          pointer-events: none; font-family: system-ui;
+        `
+        logoDiv.innerHTML = '🚶‍➡️ 팝업순례'
+        mapRef.current.appendChild(logoDiv)
+        logoRef.current = logoDiv
+      }
+    }, 100)
+
+    return () => {
+      clearTimeout(timer)
+      if (logoRef.current) {
+        logoRef.current.remove()
+        logoRef.current = null
+      }
+      if (mapInstance.current) {
+        mapInstance.current.remove()
+      }
+    }
+  }, [])
+
+  // 마커 업데이트
+  useEffect(() => {
+    console.log('🗺️ popups:', popups.length, 'selected:', selectedIds.length)
+    
+    if (!mapInstance.current) return
+
+    // 기존 마커/경로 제거
+    markers.current.forEach(m => m.remove())
+    markers.current = []
+    if (routeLayer.current) {
+      routeLayer.current.remove()
+      routeLayer.current = null
+    }
+
+    // 팝업 마커
+    popups.forEach(popup => {
+      if (!popup.latlng?.[0] || !popup.latlng?.[1]) return
+
+      const isSelected = selectedIds.includes(popup.id)
+      const markerIcon = isSelected 
+        ? window.L.divIcon({
+            className: 'custom-marker selected',
+            html: '<div style="background: #3b82f6; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"></div>',
+            iconSize: [26, 26], iconAnchor: [13, 13]
+          })
+        : window.L.divIcon({
+            className: 'custom-marker',
+            html: '<div style="background: #ef4444; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.3);"></div>',
+            iconSize: [20, 20], iconAnchor: [10, 10]
+          })
+
+      const marker = window.L.marker(popup.latlng, { icon: markerIcon })
+        .addTo(mapInstance.current)
+        .on('click', () => onSelect(popup.id))
+        .bindPopup(`
+          <div style="min-width: 200px;">
+            <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #000">${popup.name}</h4>
+            <p style="margin: 0 0 4px 0; font-size: 12px; color: #666;">${popup.address}</p>
+            <small style="color: #999;">${popup.detailCategory}</small>
+          </div>
+        `)
+
+      markers.current.push(marker)
+
+      if (isSelected && popup.id === selectedIds[0]) {
+        marker.openPopup()
+        mapInstance.current.panTo(popup.latlng, { animate: true, duration: 0.3 })
+      }
+    })
+
+    if (popups.length > 0 && markers.current.length > 0) {
+      const group = new window.L.featureGroup(markers.current)
+      mapInstance.current.fitBounds(group.getBounds(), { padding: [30, 30], maxZoom: 16 })
+    }
+  }, [popups, selectedIds, onSelect])
+
+  // ✅ 경로 그리기
+  useEffect(() => {
+    if (!mapInstance.current || !routeData?.routeCoordinates) return
+
+    // 기존 경로 제거
+    if (routeLayer.current) {
+      routeLayer.current.remove()
+    }
+
+    const coords = routeData.routeCoordinates.map(([lat, lng]) => [lat, lng])
+
+    // 파란 점선 경로
+    routeLayer.current = window.L.polyline(coords, {
+      color: '#3b82f6',
+      weight: 8,
+      opacity: 0.9,
+      dashArray: '15, 8',
+      smoothFactor: 1
+    }).addTo(mapInstance.current)
+
+    // 순서 번호 마커
+    routeData.routeIndices.forEach((index, i) => {
+      const coord = coords[index]
+      const orderIcon = window.L.divIcon({
+        className: 'route-order',
+        html: `<div style="
+          background: linear-gradient(135deg, #323232, #232323); 
+          color: white; width: 28px; height: 28px; border-radius: 50%; 
+          border: 4px solid white; display: flex; align-items: center; 
+          justify-content: center; font-weight: bold; font-size: 13px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.4); font-family: sans-serif;
+        ">${i + 1}</div>`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 18]
+      })
+      window.L.marker(coord, { icon: orderIcon }).addTo(mapInstance.current)
+    })
+
+    // 카메라 이동
+    setTimeout(() => {
+      mapInstance.current.fitBounds(routeLayer.current.getBounds(), { 
+        padding: [50, 50], 
+        duration: 1.0 
+      })
+    }, 200)
+  }, [routeData])
+
+  return (
+    <div 
+      className="map" 
+      ref={mapRef} 
+      style={{ height: '100%', width: '100%', position: 'relative', minHeight: '500px' }}
+    />
+  )
+}
