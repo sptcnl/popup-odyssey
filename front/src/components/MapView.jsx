@@ -105,10 +105,21 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
   }, [popups, selectedIds, onSelect])
 
   /* ======================
-     방문 경로 + 순서 (핵심)
+     방문 경로 + 순서 (routeData가 null이면 자동 제거)
   ====================== */
   useEffect(() => {
-    if (!mapInstance.current || !routeData?.routeCoordinates) return
+    if (!mapInstance.current) return
+
+    // ✅ routeData가 null이면 즉시 제거
+    if (!routeData?.routeCoordinates) {
+      if (routeLayer.current) {
+        routeLayer.current.remove()
+        routeLayer.current = null
+      }
+      orderMarkers.current.forEach(m => m.remove())
+      orderMarkers.current = []
+      return
+    }
 
     // 기존 제거
     if (routeLayer.current) routeLayer.current.remove()
