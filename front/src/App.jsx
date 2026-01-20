@@ -75,6 +75,8 @@ export default function App() {
               id: p.id,
               name: p.name,
               address: p.address,
+              startDate: p.startDate,
+              endDate: p.endDate,
               detailCategory: p.detailCategory || 'popup',
               latlng: [lat, lng],
             }

@@ -11,8 +11,10 @@ export default function PopupCard({ popup, selected, onClick }) {
       {/* 콘텐츠 영역 */}
       <div className="card-content">
         <h3>{popup.name}</h3>
+        <small>{popup.startDate} - {popup.endDate}</small>
+        <br/>
         <p>{popup.address}</p>
-        <small>#{popup.detailCategory}</small>
+        <small># {popup.detailCategory}</small>
       </div>
     </div>
   )
