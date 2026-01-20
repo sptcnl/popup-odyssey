@@ -63,6 +63,9 @@ export default function App() {
         setLoading(true)
         setError(null)
         const places = await storesApi.getPlaces()
+        const now = new Date()
+        
+        // ✅ 이미 지난 팝업 필터링
         const mapped = places
           .map((p) => {
             const lat = p.geoY
@@ -71,6 +74,14 @@ export default function App() {
               console.warn(`⚠️ 좌표 없는 팝업 건너뜀:`, p.name, p.id)
               return null
             }
+            
+            // 종료일이 오늘보다 이전이면 제외
+            const endDate = new Date(p.endDate)
+            if (endDate < now) {
+              console.log(`⏰ 이미 종료된 팝업 제외:`, p.name)
+              return null
+            }
+            
             return {
               id: p.id,
               name: p.name,
@@ -120,7 +131,7 @@ export default function App() {
           popups={filteredPopups}
           selectedIds={selectedIds.filter(id => filteredPopups.some(p => p.id === id))}
           onSelect={toggleSelection}
-          routeData={routeData}  // ✅ 경로 데이터 전달
+          routeData={routeData}
         />
 
         {/* 플로팅 버튼 */}
@@ -142,7 +153,6 @@ export default function App() {
           
           {/* ✅ 로딩중/완료 상태에 따른 버튼 전환 */}
           {isOptimizing ? (
-            // 로딩중: 스피너 버튼 (비활성화)
             <button disabled style={{
               background: '#6b7280', color: 'white',
               borderRadius: '50%', width: '56px', height: '56px', border: 'none',
@@ -151,7 +161,6 @@ export default function App() {
               ⏳
             </button>
           ) : routeData ? (
-            // 경로 완료: 취소 버튼
             <button onClick={clearRoute} style={{
               background: '#ef4444', color: 'white', borderRadius: '50%',
               width: '56px', height: '56px', border: 'none', cursor: 'pointer',
@@ -161,7 +170,6 @@ export default function App() {
               ❌
             </button>
           ) : selectedIds.length >= 2 ? (
-            // 선택충분 + 대기중: 경로찾기 버튼
             <button onClick={handleOptimizeRoute} style={{
               background: '#228be6', color: 'white', borderRadius: '50%',
               width: '56px', height: '56px', border: 'none', cursor: 'pointer',
@@ -171,7 +179,6 @@ export default function App() {
               🧭
             </button>
           ) : (
-            // 선택부족: 비활성화 버튼
             <button disabled style={{
               background: '#ccc', color: 'white', borderRadius: '50%',
               width: '56px', height: '56px', border: 'none', cursor: 'not-allowed',
