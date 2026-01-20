@@ -3,6 +3,8 @@ import MapView from './components/MapView'
 import PopupList from './components/PopupList'
 import FilterBar from './components/FilterBar'
 import { storesApi } from './api/stores'
+import LoginModal from './components/LoginModal'
+import AddPlaceModal from './components/AddPlaceModal'
 
 export default function App() {
   const [selectedIds, setSelectedIds] = useState([])
@@ -13,6 +15,10 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('')
   const [routeData, setRouteData] = useState(null)
   const [isOptimizing, setIsOptimizing] = useState(false)
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [showLoginModal, setShowLoginModal] = useState(false)
+  const [user, setUser] = useState(null)
 
   const toggleSelection = (id) => {
     setSelectedIds((prev) => {
@@ -59,7 +65,11 @@ export default function App() {
   }
 
   const handleAddPlace = () => {
-    alert('새로운 장소 추가 기능은 아직 준비 중입니다!')
+    if (!isLoggedIn) {
+      setShowLoginModal(true)
+      return
+    }
+    setShowAddModal(true)
   }
 
   useEffect(() => {
@@ -228,6 +238,21 @@ export default function App() {
           </div>
         </div>
       </div>
+      {showLoginModal && (
+        <LoginModal
+          onClose={() => setShowLoginModal(false)}
+          onSuccess={(user) => {
+            setIsLoggedIn(true)
+            setUser(user)
+            // 필요하면 여기서 AddPlaceModal 열기
+            setShowAddModal(true)
+          }}
+        />
+      )}
+  
+      {showAddModal && (
+        <AddPlaceModal onClose={() => setShowAddModal(false)} />
+      )}
     </div>
   )
 }

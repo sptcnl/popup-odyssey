@@ -4,6 +4,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 urlpatterns = [
     path('signup/', views.SignupView.as_view()),
+    path('auth/kakao/', views.KakaoLoginAPIView.as_view()),
     path('login/', TokenObtainPairView.as_view()),
     path('token/refresh/', TokenRefreshView.as_view()),
 ]
