@@ -34,8 +34,8 @@ html, body, #root {
 .list {
   width: 360px;
   border-left: 1px solid #ddd;
-  overflow-y: auto;
-  height: 100vh;
+  overflow-y: visible;
+  height: auto;
 }
 
 .card.selected {
