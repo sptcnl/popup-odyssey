@@ -5,13 +5,18 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
   const mapInstance = useRef(null)
   const markers = useRef([])
   const routeLayer = useRef(null)
+  const orderMarkers = useRef([])
   const logoRef = useRef(null)
 
-  // 지도 초기화
+  /* ======================
+     지도 초기화
+  ====================== */
   useEffect(() => {
     if (!window.L) return
 
-    mapInstance.current = window.L.map(mapRef.current).setView([37.5445, 127.0557], 13)
+    mapInstance.current = window.L
+      .map(mapRef.current)
+      .setView([37.5445, 127.0557], 13)
 
     window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors',
@@ -23,12 +28,12 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
         const logoDiv = document.createElement('div')
         logoDiv.style.cssText = `
           position: absolute; top: 10px; left: 10px; z-index: 1000;
-          width: 120px; height: 36px; margin: 5px;
-          background: #000000; border-radius: 10px;
+          width: 120px; height: 36px;
+          background: #000; border-radius: 10px;
           display: flex; align-items: center; justify-content: center;
           color: white; font-weight: 700; font-size: 11px;
           box-shadow: 0 4px 16px rgba(0,0,0,0.25);
-          pointer-events: none; font-family: system-ui;
+          pointer-events: none;
         `
         logoDiv.innerHTML = '🚶‍➡️ 팝업순례'
         mapRef.current.appendChild(logoDiv)
@@ -38,55 +43,47 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
 
     return () => {
       clearTimeout(timer)
-      if (logoRef.current) {
-        logoRef.current.remove()
-        logoRef.current = null
-      }
-      if (mapInstance.current) {
-        mapInstance.current.remove()
-      }
+      if (logoRef.current) logoRef.current.remove()
+      if (mapInstance.current) mapInstance.current.remove()
     }
   }, [])
 
-  // 마커 업데이트
+  /* ======================
+     팝업 마커
+  ====================== */
   useEffect(() => {
-    console.log('🗺️ popups:', popups.length, 'selected:', selectedIds.length)
-    
     if (!mapInstance.current) return
 
-    // 기존 마커/경로 제거
+    // 기존 마커 제거
     markers.current.forEach(m => m.remove())
     markers.current = []
-    if (routeLayer.current) {
-      routeLayer.current.remove()
-      routeLayer.current = null
-    }
 
-    // 팝업 마커
     popups.forEach(popup => {
-      if (!popup.latlng?.[0] || !popup.latlng?.[1]) return
+      if (!popup.latlng) return
 
       const isSelected = selectedIds.includes(popup.id)
-      const markerIcon = isSelected 
-        ? window.L.divIcon({
-            className: 'custom-marker selected',
-            html: '<div style="background: #3b82f6; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"></div>',
-            iconSize: [26, 26], iconAnchor: [13, 13]
-          })
-        : window.L.divIcon({
-            className: 'custom-marker',
-            html: '<div style="background: #ef4444; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.3);"></div>',
-            iconSize: [20, 20], iconAnchor: [10, 10]
-          })
 
-      const marker = window.L.marker(popup.latlng, { icon: markerIcon })
+      const icon = window.L.divIcon({
+        className: 'popup-marker',
+        html: `<div style="
+          background: ${isSelected ? '#3b82f6' : '#ef4444'};
+          width: ${isSelected ? 20 : 16}px;
+          height: ${isSelected ? 20 : 16}px;
+          border-radius: 50%;
+          border: 3px solid white;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        "></div>`,
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+      })
+
+      const marker = window.L.marker(popup.latlng, { icon })
         .addTo(mapInstance.current)
         .on('click', () => onSelect(popup.id))
         .bindPopup(`
-          <div style="min-width: 200px;">
-            <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #000">${popup.name}</h4>
-            <p style="margin: 0 0 4px 0; font-size: 12px; color: #666;">${popup.address}</p>
-            <small style="color: #999;">${popup.detailCategory}</small>
+          <div style="min-width:200px">
+            <h4 style="margin:0 0 6px">${popup.name}</h4>
+            <p style="margin:0;font-size:12px;color:#666">${popup.address}</p>
           </div>
         `)
 
@@ -94,69 +91,84 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
 
       if (isSelected && popup.id === selectedIds[0]) {
         marker.openPopup()
-        mapInstance.current.panTo(popup.latlng, { animate: true, duration: 0.3 })
+        mapInstance.current.panTo(popup.latlng)
       }
     })
 
-    if (popups.length > 0 && markers.current.length > 0) {
-      const group = new window.L.featureGroup(markers.current)
-      mapInstance.current.fitBounds(group.getBounds(), { padding: [30, 30], maxZoom: 16 })
+    if (markers.current.length) {
+      const group = window.L.featureGroup(markers.current)
+      mapInstance.current.fitBounds(group.getBounds(), {
+        padding: [30, 30],
+        maxZoom: 16,
+      })
     }
   }, [popups, selectedIds, onSelect])
 
-  // ✅ 경로 그리기 (돌아오는 선 제외)
+  /* ======================
+     방문 경로 + 순서 (핵심)
+  ====================== */
   useEffect(() => {
     if (!mapInstance.current || !routeData?.routeCoordinates) return
 
-    // 기존 경로 제거
-    if (routeLayer.current) {
-      routeLayer.current.remove()
-    }
+    // 기존 제거
+    if (routeLayer.current) routeLayer.current.remove()
+    orderMarkers.current.forEach(m => m.remove())
+    orderMarkers.current = []
 
-    // ✅ 마지막 좌표 제외 (돌아오는 부분 제거)
-    const pathCoords = routeData.routeCoordinates.slice(0, -1).map(([lat, lng]) => [lat, lng])
+    // 🔥 방문 순서 = 배열 순서
+    const pathCoords = routeData.routeCoordinates.slice(0, -1)
 
-    // 파란 점선 경로
+    // 경로
     routeLayer.current = window.L.polyline(pathCoords, {
       color: '#3b82f6',
       weight: 8,
       opacity: 0.9,
-      dashArray: '15, 8',
-      smoothFactor: 1
+      dashArray: '14,8',
     }).addTo(mapInstance.current)
 
-    // 순서 번호 마커 (마지막 제외)
-    routeData.routeIndices.slice(0, -1).forEach((index, i) => {
-      const coord = routeData.routeCoordinates[index]
+    // 방문 순서 번호
+    pathCoords.forEach((coord, i) => {
       const orderIcon = window.L.divIcon({
-        className: 'route-order',
-        html: `<div style="
-          background: linear-gradient(135deg, #323232, #232323); 
-          color: white; width: 28px; height: 28px; border-radius: 50%; 
-          border: 4px solid white; display: flex; align-items: center; 
-          justify-content: center; font-weight: bold; font-size: 13px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.4); font-family: sans-serif;
-        ">${i + 1}</div>`,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18]
+        className: '',
+        html: `
+          <div style="
+            width: 28px;
+            height: 28px;
+            background: #222;
+            color: white;
+            border-radius: 50%;
+            border: 4px solid white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 13px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+          ">
+            ${i + 1}
+          </div>
+        `,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
       })
-      window.L.marker(coord, { icon: orderIcon }).addTo(mapInstance.current)
+
+      const m = window.L.marker(coord, { icon: orderIcon })
+        .addTo(mapInstance.current)
+
+      orderMarkers.current.push(m)
     })
 
-    // 카메라 이동
     setTimeout(() => {
-      mapInstance.current.fitBounds(routeLayer.current.getBounds(), { 
-        padding: [50, 50], 
-        duration: 1.0 
+      mapInstance.current.fitBounds(routeLayer.current.getBounds(), {
+        padding: [50, 50],
       })
     }, 200)
   }, [routeData])
 
   return (
-    <div 
-      className="map" 
-      ref={mapRef} 
-      style={{ height: '100%', width: '100%', position: 'relative', minHeight: '500px' }}
+    <div
+      ref={mapRef}
+      style={{ width: '100%', height: '100%', minHeight: '500px' }}
     />
   )
 }
