@@ -90,6 +90,9 @@ export default function App() {
               endDate: p.endDate,
               detailCategory: p.detailCategory || 'popup',
               latlng: [lat, lng],
+              status: now < new Date(p.startDate)
+                ? '⏰진행 예정'
+                : '🔥진행 중',
             }
           })
           .filter(Boolean)
