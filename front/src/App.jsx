@@ -202,10 +202,7 @@ export default function App() {
       </div>
 
       {/* 사이드바 */}
-      <div style={{
-        width: '25%', height: '100vh', display: 'flex', flexDirection: 'column',
-        background: '#fafbfc', borderLeft: '1px solid #e1e5e9', overflow: 'hidden',
-      }}>
+      <div className='sidebar'>
         <div style={{ flex: '0 0 auto' }}>
           <FilterBar
             searchQuery={searchQuery} onSearchChange={setSearchQuery}
