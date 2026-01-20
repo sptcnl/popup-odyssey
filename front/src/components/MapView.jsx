@@ -177,9 +177,127 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
   }, [routeData])
 
   return (
-    <div
-      ref={mapRef}
-      style={{ width: '100%', height: '100%', minHeight: '500px' }}
-    />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div
+        ref={mapRef}
+        style={{ width: '100%', height: '100%', minHeight: '500px' }}
+      />
+
+      {/* 🔽 방문 순서 패널 */}
+      {routeData?.routeIndices && (
+        <div
+          style={{
+            position: 'absolute',
+            right: 16,
+            bottom: 16,
+            width: 340,
+            maxHeight: '65%',
+            overflowY: 'auto',
+            background: 'rgba(255,255,255,0.96)',
+            backdropFilter: 'blur(8px)',
+            borderRadius: 18,
+            boxShadow: '0 16px 40px rgba(0,0,0,0.3)',
+            padding: 16,
+            zIndex: 1000,
+            fontFamily: 'system-ui, sans-serif',
+          }}
+        >
+          <RoutePanel routeData={routeData} popups={popups} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RoutePanel({ routeData, popups }) {
+  const totalMinutes = Math.round(routeData.totalDurationMinutes)
+
+  // 🔥 routeIndices 기준으로 방문 순서 생성
+  const visitList = routeData.routeIndices
+    .slice(0, -1) // 시작점으로 돌아오는 마지막 제거
+    .map((popupIndex, i) => ({
+      order: i + 1,
+      popup: popups[popupIndex],
+    }))
+    .filter(v => v.popup)
+
+  const copyText = `
+걸어서 총 ${totalMinutes}분 팝업 순례!
+
+${visitList
+  .map(
+    v =>
+      `${v.order}. ${v.popup.name}\n주소: ${v.popup.address}`
+  )
+  .join('\n\n')}
+`.trim()
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(copyText)
+    alert('📋 방문 순서가 복사되었습니다')
+  }
+
+  return (
+    <>
+      {/* 헤더 */}
+      <div style={{ marginBottom: 14 }}>
+        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>
+          🚶‍♂️ 걸어서 총 {totalMinutes}분 팝업 순례!
+        </h3>
+        <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+          총 {visitList.length}곳 · OSRM 기준
+        </div>
+      </div>
+
+      {/* 방문 리스트 */}
+      <div>
+        {visitList.map(v => (
+          <div
+            key={v.order}
+            style={{
+              padding: '12px 14px',
+              marginBottom: 10,
+              borderRadius: 14,
+              background: '#f6f7f9',
+              border: '1px solid #eee',
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 700 }}>
+              {v.order}. {v.popup.name}
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: '#555',
+                marginTop: 6,
+                lineHeight: 1.4,
+              }}
+            >
+              📍 {v.popup.address}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 복사 버튼 */}
+      <button
+        onClick={handleCopy}
+        style={{
+          marginTop: 12,
+          width: '100%',
+          padding: '12px 0',
+          borderRadius: 14,
+          border: 'none',
+          background: '#3b82f6',
+          color: 'white',
+          fontWeight: 800,
+          fontSize: 14,
+          cursor: 'pointer',
+          boxShadow: '0 6px 16px rgba(59,130,246,0.45)',
+        }}
+      >
+        📋 방문 순서 복사
+      </button>
+    </>
   )
 }
