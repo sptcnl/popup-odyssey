@@ -9,7 +9,7 @@ export default function PopupCard({ popup, selected, onClick }) {
       <div className="card-overlay" />
       
       {/* 콘텐츠 영역 */}
-      <div className="card-content">
+      <div className="card-content" style={{ padding: '1px 12px 12px 16px' }}>
         <h3>{popup.name}</h3>
         <small>{popup.startDate} - {popup.endDate} : {popup.status}</small>
         <br/>
