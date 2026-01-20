@@ -104,7 +104,7 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
     }
   }, [popups, selectedIds, onSelect])
 
-  // ✅ 경로 그리기
+  // ✅ 경로 그리기 (돌아오는 선 제외)
   useEffect(() => {
     if (!mapInstance.current || !routeData?.routeCoordinates) return
 
@@ -113,10 +113,11 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
       routeLayer.current.remove()
     }
 
-    const coords = routeData.routeCoordinates.map(([lat, lng]) => [lat, lng])
+    // ✅ 마지막 좌표 제외 (돌아오는 부분 제거)
+    const pathCoords = routeData.routeCoordinates.slice(0, -1).map(([lat, lng]) => [lat, lng])
 
     // 파란 점선 경로
-    routeLayer.current = window.L.polyline(coords, {
+    routeLayer.current = window.L.polyline(pathCoords, {
       color: '#3b82f6',
       weight: 8,
       opacity: 0.9,
@@ -124,9 +125,9 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
       smoothFactor: 1
     }).addTo(mapInstance.current)
 
-    // 순서 번호 마커
-    routeData.routeIndices.forEach((index, i) => {
-      const coord = coords[index]
+    // 순서 번호 마커 (마지막 제외)
+    routeData.routeIndices.slice(0, -1).forEach((index, i) => {
+      const coord = routeData.routeCoordinates[index]
       const orderIcon = window.L.divIcon({
         className: 'route-order',
         html: `<div style="
