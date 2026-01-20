@@ -32,13 +32,18 @@ export default function App() {
     }
 
     setIsOptimizing(true)
+    setRouteData(null)
     try {
       const selectedPlaces = popups.filter((p) => selectedIds.includes(p.id))
       const coordinates = selectedPlaces.map(p => p.latlng)
       const result = await storesApi.optimizeRoute({ coordinates })
       
       console.log('✅ 경로 최적화 결과:', result)
-      setRouteData(result)
+      setRouteData({
+        ...result,
+        selectedPlaces,
+        routeVersion: Date.now()
+      })
       alert(`${result.nLocations}개 → 최적화 완료! 지도 확인하세요.`)
     } catch (e) {
       console.error(e)
@@ -131,8 +136,11 @@ export default function App() {
       {/* 지도 */}
       <div style={{ flex: 3, height: '100vh', position: 'relative' }}>
         <MapView
+          key={routeData?.routeVersion || 'map'}
           popups={filteredPopups}
-          selectedIds={selectedIds.filter(id => filteredPopups.some(p => p.id === id))}
+          selectedIds={selectedIds.filter(id =>
+            filteredPopups.some(p => p.id === id)
+          )}
           onSelect={toggleSelection}
           routeData={routeData}
         />

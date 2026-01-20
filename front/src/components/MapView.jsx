@@ -209,7 +209,14 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
   )
 }
 
-function RoutePanel({ routeData, popups }) {
+function RoutePanel({ routeData, popups}) {
+  if (
+    !routeData ||
+    !Array.isArray(routeData.routeIndices) ||
+    !Array.isArray(routeData.selectedPlaces)
+  ) {
+    return null // 🔥 여기서 막아야 함
+  }
   const totalMinutes = Math.round(routeData.totalDurationMinutes)
 
   // 🔥 routeIndices 기준으로 방문 순서 생성
@@ -217,7 +224,7 @@ function RoutePanel({ routeData, popups }) {
     .slice(0, -1) // 시작점으로 돌아오는 마지막 제거
     .map((popupIndex, i) => ({
       order: i + 1,
-      popup: popups[popupIndex],
+      popup: routeData.selectedPlaces[popupIndex],
     }))
     .filter(v => v.popup)
 
@@ -247,6 +254,24 @@ ${visitList
         <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
           총 {visitList.length}곳 · OSRM 기준
         </div>
+        {/* 복사 버튼 */}
+        <button
+          onClick={handleCopy}
+          style={{
+            marginTop: 12,
+            width: '100%',
+            padding: '12px 0',
+            borderRadius: 14,
+            border: 'none',
+            background: '#3b82f6',
+            color: 'white',
+            fontWeight: 800,
+            fontSize: 14,
+            cursor: 'pointer',
+          }}
+        >
+          📋 방문 순서 복사
+        </button>
       </div>
 
       {/* 방문 리스트 */}
@@ -278,26 +303,6 @@ ${visitList
           </div>
         ))}
       </div>
-
-      {/* 복사 버튼 */}
-      <button
-        onClick={handleCopy}
-        style={{
-          marginTop: 12,
-          width: '100%',
-          padding: '12px 0',
-          borderRadius: 14,
-          border: 'none',
-          background: '#3b82f6',
-          color: 'white',
-          fontWeight: 800,
-          fontSize: 14,
-          cursor: 'pointer',
-          boxShadow: '0 6px 16px rgba(59,130,246,0.45)',
-        }}
-      >
-        📋 방문 순서 복사
-      </button>
     </>
   )
 }
