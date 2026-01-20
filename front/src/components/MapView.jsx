@@ -27,11 +27,24 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
       if (mapRef.current && !logoRef.current) {
         const logoDiv = document.createElement('div')
         logoDiv.style.cssText = `
-          position: absolute; top: 10px; left: 10px; z-index: 1000;
-          width: 120px; height: 36px;
-          background: #000; border-radius: 10px;
-          display: flex; align-items: center; justify-content: center;
-          color: white; font-weight: 700; font-size: 11px;
+          position: absolute;
+          top: 2%;
+          left: 2%;
+          z-index: 1000;
+
+          width: clamp(90px, 12vw, 140px);
+          height: clamp(28px, 3.5vw, 40px);
+
+          background: #000;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+
+          color: white;
+          font-weight: 800;
+          font-size: clamp(10px, 1.6vw, 13px);
+
           box-shadow: 0 4px 16px rgba(0,0,0,0.25);
           pointer-events: none;
         `
