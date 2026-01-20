@@ -167,7 +167,7 @@ export default function App() {
               fontSize: '20px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
               transition: 'all 0.2s',
             }} title="경로 초기화">
-              ❌
+              ✕
             </button>
           ) : selectedIds.length >= 2 ? (
             <button onClick={handleOptimizeRoute} style={{
