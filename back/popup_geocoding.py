@@ -108,7 +108,6 @@ def validate_popup_data(df: pd.DataFrame) -> pd.DataFrame:
             'user_id': None,
             'is_public': True,
             'name': name,
-            'image_path': None,
             'address': address,
             'status': status,
             'start_date': start_date if start_date else None,
@@ -117,6 +116,7 @@ def validate_popup_data(df: pd.DataFrame) -> pd.DataFrame:
             'geo_y': geo_y,
             'geo_validated': bool(geo_x and geo_y),
             'link': None,
+            'is_popup': True,
             'detail_category': category[:100],
             'created_at': datetime.now(),
             'updated_at': datetime.now()
