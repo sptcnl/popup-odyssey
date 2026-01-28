@@ -31,7 +31,7 @@ class Place(models.Model):
     geo_y = models.FloatField(null=True, blank=True)  # 위도 (latitude)
     geo_validated = models.BooleanField(default=False)
     link = models.URLField(max_length=500, null=True, blank=True, verbose_name="상세 링크")
-    is_popup = models.BooleanField()
+    is_popup = models.BooleanField(null=True, blank=True, default=False)
     detail_category = models.CharField(max_length=100, null=True, blank=True, verbose_name="상세 카테고리")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

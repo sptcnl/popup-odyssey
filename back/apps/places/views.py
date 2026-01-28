@@ -1,17 +1,34 @@
 # places/views.py
 from rest_framework import generics
 from .models import Place
-from .serializers import PlaceSerializer
+from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
+from .serializers import PlaceCreateSerializer, PlaceListSerializer
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from django.db.models import Q
 
 
 class PlaceListCreateAPIView(generics.ListCreateAPIView):
-    queryset = Place.objects.all()
-    serializer_class = PlaceSerializer
-
-    # 예: 로그인 유저만 생성자로 넣고 싶으면 override 가능
-    def perform_create(self, serializer):
-        # user 필드가 null 허용이라면 다음은 선택사항
+    serializer_class = PlaceListSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return PlaceCreateSerializer
+        return PlaceListSerializer
+    
+    def get_serializer_context(self):  # 이전 수정사항 유지
+        context = super().get_serializer_context()
+        context.update({"request": self.request})
+        return context
+    
+    def get_queryset(self):
         if self.request.user.is_authenticated:
-            serializer.save(user=self.request.user)
-        else:
-            serializer.save()
+            # ✅ 두 방식 모두 가능
+            return Place.objects.filter(
+                Q(is_public=True) | Q(user=self.request.user)
+            ).distinct()  # 중복 제거 안전장치
+        return Place.objects.filter(is_public=True)
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)

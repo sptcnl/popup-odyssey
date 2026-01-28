@@ -31,7 +31,7 @@ export default function AddPlaceModal({ onClose }) {
       await storesApi.createPlace({
         name, 
         address,
-        is_popup: isPopup,
+        isPopup: isPopup,
         start_date: startDate,
         end_date: endDate,
         is_public: isPublic
@@ -127,7 +127,6 @@ export default function AddPlaceModal({ onClose }) {
   )
 }
 
-// 👇 스타일들 (변경 없음)
 const overlayStyle = {
   position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
   display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000

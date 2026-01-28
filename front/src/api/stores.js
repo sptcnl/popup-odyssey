@@ -1,8 +1,8 @@
 const API_BASE = 'http://localhost:8000/api';
 
 export const storesApi = {
-  async createPlace({ name, address, is_popup, start_date, end_date, is_public = true }) {
-    console.log('Place 생성 API 호출:', { name, address, is_popup, start_date, end_date, is_public });
+  async createPlace({ name, address, isPopup, start_date, end_date, is_public = true }) {
+    console.log('Place 생성 API 호출:', { name, address, isPopup, start_date, end_date, is_public });
     
     const response = await fetch(`${API_BASE}/places/`, {
       method: 'POST',
@@ -14,7 +14,7 @@ export const storesApi = {
         name, 
         address, 
         is_public,
-        ...(is_popup && { start_date, end_date })
+        ...(isPopup && { start_date, end_date })
       }),
     });
     
@@ -28,11 +28,28 @@ export const storesApi = {
   },
 
   async getPlaces() {
-    const response = await fetch(`${API_BASE}/places/`);
-    if (!response.ok) throw new Error('장소 목록 로드 실패');
-    const data = await response.json();
-    console.log(data)
-    return data;
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+
+    const token = localStorage.getItem('access')
+
+    // 🔥 토큰이 있을 때만 Authorization 추가
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/places/`, { 
+      headers,
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`장소 로드 실패 (${response.status}): ${errorText}`);
+    }
+
+    return await response.json();
   },
 
   async optimizeRoute({ coordinates }) {
