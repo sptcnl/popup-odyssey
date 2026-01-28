@@ -84,7 +84,6 @@ def full_pagination_all_columns(query, max_pages=3, max_results=50):
                 'geo_x': geo_x,
                 'geo_y': geo_y,
                 'is_public': True,
-                'image_path': None,
                 'status': None,
                 'start_date': None,
                 'end_date': None,
@@ -146,7 +145,7 @@ if __name__ == "__main__":
         # Place 모델 필드 정확 매핑
         place_columns = [
             'name', 'address', 'link', 'detail_category', 
-            'geo_x', 'geo_y', 'is_public', 'image_path',
+            'geo_x', 'geo_y', 'is_public',
             'status', 'start_date', 'end_date', 'geo_validated',
             'created_at', 'updated_at'
         ]
