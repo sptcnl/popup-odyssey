@@ -178,8 +178,8 @@ export default function App() {
       return false
     }
 
-    // 3️⃣ 카테고리 필터 (일반 탭만)
-    if (placeType === 'normal' && selectedCategory && selectedCategory !== '') {
+    // 3️⃣ 카테고리 필터 (팝업 + 일반 공통)
+    if (selectedCategory && selectedCategory !== '') {
       return p.categories.includes(selectedCategory)
     }
 
@@ -193,6 +193,10 @@ export default function App() {
 
     return true
   })
+
+  useEffect(() => {
+    setSelectedCategory('')
+  }, [placeType])
 
   const categoryList = Array.from(
     new Set(
@@ -328,38 +332,10 @@ export default function App() {
           onSearchChange={setSearchQuery}
           selectedCategory={selectedCategory}
           onCategoryChange={setSelectedCategory}
-          popups={filteredPlaces}
+          popups={places}
           filteredCount={filteredPlaces.length}
+          placeType={placeType}
         />
-
-        {/* 카테고리 필터 */}
-        {placeType === 'normal' && categoryList.length > 0 && (
-          <div style={{
-            padding: '12px',
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '8px',
-            borderBottom: '1px solid #e9ecef',
-          }}>
-            {categoryList.map(cat => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
-                style={{
-                  padding: '6px 10px',
-                  borderRadius: '16px',
-                  border: '1px solid #dee2e6',
-                  background: selectedCategory === cat ? '#228be6' : 'white',
-                  color: selectedCategory === cat ? 'white' : '#495057',
-                  fontSize: '13px',
-                  cursor: 'pointer',
-                }}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* 리스트 */}
         <div style={{ flex: 1, overflowY: 'auto' }}>

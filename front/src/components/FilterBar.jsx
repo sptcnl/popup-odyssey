@@ -5,10 +5,16 @@ export default function FilterBar({
   selectedCategory, 
   onCategoryChange, 
   popups, 
-  filteredCount 
+  filteredCount,
+  placeType
 }) {
   const categories = Array.from(
-    new Set(popups.map(p => p.detailCategory).filter(Boolean))
+    new Set(
+      popups
+        .filter(p => placeType === 'popup' ? p.isPopup : !p.isPopup)
+        .flatMap(p => p.categories)
+        .filter(Boolean)
+    )
   ).sort()
 
   return (
