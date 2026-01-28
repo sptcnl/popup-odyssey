@@ -77,12 +77,12 @@ RUN chmod +x crawler.py food_scrap.py
 RUN touch /var/log/crawler.log /var/log/food_scrap.log && \
     chmod 666 /var/log/crawler.log /var/log/food_scrap.log
 
-# 크론탭 (중복 제거 + 안전 설정)
-RUN echo "SHELL=/bin/bash" > /tmp/crontab && \
-    echo "0 9 * * * /usr/local/bin/python /app/crawler.py >> /var/log/crawler.log 2>&1" >> /tmp/crontab && \
-    echo "0 9 * * 1 cd /app && /usr/local/bin/python food_scrap.py >> /var/log/food_scrap.log 2>&1" >> /tmp/crontab && \
-    echo "0 0 * * * find /var/log -name '*.log.*' -mtime +7 -delete 2>/dev/null" >> /tmp/crontab && \
-    crontab /tmp/crontab && rm /tmp/crontab
+# # 크론탭 (중복 제거 + 안전 설정)
+# RUN echo "SHELL=/bin/bash" > /tmp/crontab && \
+#     echo "0 9 * * * /usr/local/bin/python /app/crawler.py >> /var/log/crawler.log 2>&1" >> /tmp/crontab && \
+#     echo "0 9 * * 1 cd /app && /usr/local/bin/python food_scrap.py >> /var/log/food_scrap.log 2>&1" >> /tmp/crontab && \
+#     echo "0 0 * * * find /var/log -name '*.log.*' -mtime +7 -delete 2>/dev/null" >> /tmp/crontab && \
+#     crontab /tmp/crontab && rm /tmp/crontab
 
 # 시작 스크립트
 RUN echo '#!/bin/bash\n\
