@@ -102,7 +102,7 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
 
       markers.current.push(marker)
 
-      if (isSelected && popup.id === selectedIds[0]) {
+      if (isSelected && popup.id === selectedIds[selectedIds.length - 1]) {
         marker.openPopup()
         mapInstance.current.panTo(popup.latlng)
       }
