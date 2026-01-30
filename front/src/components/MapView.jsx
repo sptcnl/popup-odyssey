@@ -140,7 +140,7 @@ export default function MapView({ popups, selectedIds, onSelect, routeData }) {
     orderMarkers.current = []
 
     // 🔥 방문 순서 = 배열 순서
-    const pathCoords = routeData.routeCoordinates.slice(0, -1)
+    const pathCoords = routeData.routeCoordinates
 
     // 경로
     routeLayer.current = window.L.polyline(pathCoords, {
@@ -232,14 +232,24 @@ function RoutePanel({ routeData, popups}) {
   }
   const totalMinutes = Math.round(routeData.totalDurationMinutes)
 
-  // 🔥 routeIndices 기준으로 방문 순서 생성
-  const visitList = routeData.routeIndices
-    .slice(0, -1) // 시작점으로 돌아오는 마지막 제거
-    .map((popupIndex, i) => ({
-      order: i + 1,
-      popup: routeData.selectedPlaces[popupIndex],
-    }))
-    .filter(v => v.popup)
+  const uniqueIndices = []
+  const max = routeData.selectedPlaces.length
+
+  for (const idx of routeData.routeIndices.slice(0, -1)) {
+    if (
+      Number.isInteger(idx) &&
+      idx >= 0 &&
+      idx < max &&
+      !uniqueIndices.includes(idx)
+    ) {
+      uniqueIndices.push(idx)
+    }
+  }
+
+  const visitList = routeData.routeIndices.map((idx, i) => ({
+    order: i + 1,
+    popup: routeData.selectedPlaces[idx],
+  }))
 
   const copyText = `
 걸어서 총 ${totalMinutes}분 팝업 순례!
