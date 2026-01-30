@@ -195,155 +195,167 @@ class OSRMDistanceCalculator:
         return matrix
 
 class ORToolsTSP:
-    """⚡ OR-Tools TSP Solver - 완전 폴백"""
-    
+    """⚡ OR-Tools Path TSP Solver (편도 전용)"""
+
     @staticmethod
-    def solve_tsp(distance_matrix: np.ndarray, time_limit: int = 90) -> List[int]:
-        """TSP 최적화 + 2단계 폴백: OR-Tools → Nearest Neighbor"""
+    def solve_path(distance_matrix: np.ndarray, start_index: int = 0, time_limit: int = 90) -> List[int]:
         n = distance_matrix.shape[0]
-        if n < 2:
+        if n <= 1:
             return list(range(n))
-        
-        # 무한대 값 정리
-        matrix = np.where(distance_matrix > 500000, 999999, distance_matrix)
-        np.fill_diagonal(matrix, 0)
-        
+
         try:
-            route = ORToolsTSP._ortools_solve(matrix, time_limit)
-            if len(route) == n and route[0] == 0:
-                return route
+            return ORToolsTSP._ortools_solve_path(distance_matrix, start_index, time_limit)
         except Exception as e:
             logger.warning(f"❌ OR-Tools 실패 → NN 폴백: {str(e)[:50]}")
-        
-        # Nearest Neighbor 폴백
-        return ORToolsTSP._nearest_neighbor(matrix)
-    
+            return ORToolsTSP._nearest_neighbor_path(distance_matrix, start_index)
+
     @staticmethod
-    def _ortools_solve(matrix: np.ndarray, time_limit: int) -> List[int]:
-        """OR-Tools 메인 솔버 (시작점 0 고정)"""
+    def _ortools_solve_path(matrix: np.ndarray, start_index: int, time_limit: int) -> List[int]:
         n = matrix.shape[0]
-        manager = pywrapcp.RoutingIndexManager(n, 1, 0)  # 1 vehicle, start at 0
+
+        manager = pywrapcp.RoutingIndexManager(
+            n,
+            1,
+            start_index,          # 시작점 고정
+            list(range(n))        # ❗ 모든 노드를 종료 후보로
+        )
         routing = pywrapcp.RoutingModel(manager)
-        
+
         def distance_callback(from_index, to_index):
             from_node = manager.IndexToNode(from_index)
             to_node = manager.IndexToNode(to_index)
-            return max(1, int(matrix[from_node, to_node]))
-        
+            return max(1, int(matrix[from_node][to_node]))
+
         transit_callback_index = routing.RegisterTransitCallback(distance_callback)
         routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
-        
-        # 검색 파라미터 최적화
+
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
+            routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+        )
         search_parameters.local_search_metaheuristic = (
-            routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH)
+            routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+        )
         search_parameters.time_limit.FromSeconds(time_limit)
-        search_parameters.log_search = True
-        
+
         solution = routing.SolveWithParameters(search_parameters)
         if not solution:
-            raise ValueError("OR-Tools 솔루션 생성 실패")
-        
-        # 경로 복원
+            raise ValueError("OR-Tools Path 솔루션 실패")
+
         route = []
         index = routing.Start(0)
         while not routing.IsEnd(index):
             route.append(manager.IndexToNode(index))
             index = solution.Value(routing.NextVar(index))
-        route.append(0)  # 시작점으로 복귀
+
         return route
-    
+
     @staticmethod
-    def _nearest_neighbor(matrix: np.ndarray) -> List[int]:
-        """최적화된 Nearest Neighbor 휴리스틱"""
+    def _nearest_neighbor_path(matrix: np.ndarray, start: int) -> List[int]:
         n = matrix.shape[0]
         visited = [False] * n
-        route = [0]  # 시작점 0
-        visited[0] = True
-        current = 0
-        
-        for _ in range(1, n):
+        route = [start]
+        visited[start] = True
+        current = start
+
+        for _ in range(n - 1):
             next_node, min_dist = -1, float('inf')
             for j in range(n):
                 if not visited[j] and matrix[current][j] < min_dist:
                     min_dist = matrix[current][j]
                     next_node = j
-            if next_node != -1:
-                route.append(next_node)
-                visited[next_node] = True
-                current = next_node
-        
-        route.append(0)  # 시작점으로 복귀
+            if next_node == -1:
+                break
+            route.append(next_node)
+            visited[next_node] = True
+            current = next_node
+
         return route
 
 class RouteOptimizationView(APIView):
-    """🗺️ 팝업스토어 경로 최적화 API - 1~100개 완전 처리"""
+    """🗺️ 팝업스토어 경로 최적화 API - 역 자동선택 + 1~100개 완전 처리"""
     
     permission_classes = [AllowAny]
-    
-    @extend_schema(
-        summary="팝업스토어 최적 방문 순서 계산",
-        description="OSRM Table/Route 자동 폴백 + OR-Tools TSP + Haversine 완전 백업\n지원: 1~100개 지점, 도보/자전거/자동차",
-        tags=['🗺️ Route Optimization'],
-        request={
-            'application/json': {
-                'type': 'object',
-                'properties': {
-                    'coordinates': {
-                        'type': 'array',
-                        'items': {
-                            'type': 'array',
-                            'items': {'type': 'number'},
-                            'minItems': 2,
-                            'maxItems': 2,
-                            'description': '[위도, 경도]'
-                        },
-                        'minItems': 1,
-                        'maxItems': 100,
-                        'description': '[[lat1,lon1], [lat2,lon2], ...]'
-                    },
-                    'mode': {
-                        'type': 'string',
-                        'enum': ['foot', 'walking', 'car', 'driving', 'bike', 'cycling'],
-                        'default': 'foot',
-                        'description': '이동 수단'
-                    },
-                    'start_index': {
-                        'type': 'integer',
-                        'minimum': 0,
-                        'description': '고정 출발 지점 인덱스 (기본값: 0)'
-                    },
-                    'time_limit': {
-                        'type': 'integer',
-                        'minimum': 10,
-                        'maximum': 300,
-                        'default': 90,
-                        'description': 'OR-Tools 최적화 시간 제한(초)'
-                    }
-                }
-            }
-        },
-        responses={
-            200: OpenApiResponse(
-                description='최적 경로 계산 완료',
-                examples={
-                    'success': {
-                        'summary': '완료 예제',
-                        'value': {
-                            'success': True,
-                            'n_locations': 3,
-                            'route_indices': [0, 2, 1],
-                            'route_coordinates': [[36.35, 127.38], [36.36, 127.39], [36.34, 127.37]],
-                            'total_duration_minutes': 45.2,
-                            'osrm_used': True,
-                            'processing_time': 1.23
-                        }
-                    }
-                }
+
+    STATIONS = {
+        'tukseom': [37.5330, 127.0700],    # 뚝섬역 2호선
+        'seongsu': [37.5445, 127.0467],    # 성수역 2호선  
+        'konkuk': [37.5397, 127.0708],     # 건대입구역 2호선
+        'daejeon': [36.3504, 127.3845],    # 대전역 (기본값)
+    }
+
+    def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Haversine 직선거리 계산 (초 단위)"""
+        if lat1 == lat2 and lon1 == lon2:
+            return 0.0
+        
+        R = 6371.0  # 지구 반경(km)
+        WALKING_SPEED = 4.8  # km/h
+        
+        lat1_rad, lon1_rad, lat2_rad, lon2_rad = map(radians, [lat1, lon1, lat2, lon2])
+        dlat, dlon = lat2_rad - lat1_rad, lon2_rad - lon1_rad
+        
+        a = sin(dlat/2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon/2)**2
+        c = 2 * atan2(sqrt(a), sqrt(1-a))
+        distance_km = R * c
+        
+        return (distance_km / WALKING_SPEED) * 3600  # 초 단위
+
+    def _select_station_by_popup_density(self, coordinates: List[List[float]]) -> tuple:
+        """📍 팝업스토어 중심점 기준 가장 가까운 역 자동 선택"""
+        if len(coordinates) < 2:
+            return 'daejeon', self.STATIONS['daejeon'], 0.0
+        
+        # 팝업 중심점(centroid) 계산
+        center_lat = sum(coord[0] for coord in coordinates) / len(coordinates)
+        center_lon = sum(coord[1] for coord in coordinates) / len(coordinates)
+        popup_center = [center_lat, center_lon]
+        
+        # 각 역과의 도보시간 계산
+        distances = []
+        for station_name, station_coord in self.STATIONS.items():
+            duration = self._haversine_distance(
+                popup_center[0], popup_center[1], 
+                station_coord[0], station_coord[1]
             )
-        }
+            distances.append((station_name, station_coord, duration))
+        
+        # 가장 가까운 역 선택
+        nearest_station, station_coords, distance = min(distances, key=lambda x: x[2])
+        logger.info(f"🚉 팝업중심({popup_center[0]:.4f},{popup_center[1]:.4f}) → {nearest_station}")
+        return nearest_station, station_coords, distance
+
+    def _sort_by_proximity(self, coordinates: List[List[float]], reference_point: List[float]) -> List[int]:
+        """🔍 기준점 기준 거리순 정렬 (인덱스 반환)"""
+        distances = []
+        for i, (lat, lon) in enumerate(coordinates):
+            duration = self._haversine_distance(
+                reference_point[0], reference_point[1], lat, lon
+            )
+            distances.append((i, duration))
+        
+        distances.sort(key=lambda x: x[1])
+        return [idx for idx, _ in distances]
+
+    @extend_schema(
+        summary="팝업스토어 최적 방문 순서 계산 (역 자동선택)",
+        description="팝업 위치 기반 자동 역선택 + OSRM + OR-Tools TSP",
+        tags=['🗺️ Route Optimization'],
+        request={'application/json': {
+            'type': 'object',
+            'properties': {
+                'coordinates': {
+                    'type': 'array',
+                    'items': {'type': 'array', 'items': {'type': 'number'}},
+                    'minItems': 1, 'maxItems': 100,
+                    'description': '[[lat1,lon1], [lat2,lon2], ...]'
+                },
+                'mode': {'type': 'string', 'enum': ['foot', 'car', 'bike'], 'default': 'foot'},
+                'start_index': {'type': 'integer', 'minimum': 0},
+                'time_limit': {'type': 'integer', 'minimum': 10, 'maximum': 300, 'default': 90}
+            }
+        }},
+        responses={200: OpenApiResponse(description='최적 경로 + 추천역 정보')}
     )
     
     def post(self, request):
@@ -361,51 +373,68 @@ class RouteOptimizationView(APIView):
             return Response({'success': False, 'error': '최대 100개 좌표만 지원'}, 
                           status=status.HTTP_400_BAD_REQUEST)
         
-        # 좌표 형식 엄격 검증
+        # 좌표 형식 검증
         for i, coord in enumerate(coordinates):
             if (len(coord) != 2 or 
                 not all(isinstance(x, (int, float)) for x in coord) or
                 not (-90 <= coord[0] <= 90 and -180 <= coord[1] <= 180)):
                 return Response({
                     'success': False,
-                    'error': f'coordinates[{i}] 유효하지 않음: [lat(-90~90), lon(-180~180)] 필요'
+                    'error': f'coordinates[{i}] 유효하지 않음'
                 }, status=status.HTTP_400_BAD_REQUEST)
         
         mode = data.get('mode', 'foot')
         start_index = data.get('start_index', 0) % n
         time_limit = data.get('time_limit', 90)
         
-        logger.info(f"🗺️ 최적화 요청: {n}개 지점 ({mode}), 시작: {start_index}")
+        logger.info(f"🗺️ 최적화 요청: {n}개 지점 ({mode})")
         
         try:
-            # 1. 거리 매트릭스 계산 (OSRM + Haversine)
+            # 1. 팝업 위치 기반 자동 역 선택
+            station_name, station_coords, station_distance = self._select_station_by_popup_density(coordinates)
+            
+            # 2. 거리 매트릭스 계산 (기존 OSRM)
             calculator = OSRMDistanceCalculator()
             duration_matrix = calculator.get_duration_matrix(coordinates, mode)
             
-            # 2. TSP 최적화 (OR-Tools + NN)
+            # 3. 역 기준 근접도 정렬
+            proximity_order = self._sort_by_proximity(coordinates, station_coords)
+            reordered_matrix = duration_matrix[np.ix_(proximity_order, proximity_order)]
+
+            # 4. 편도 TSP (Path)
+            start_pos = proximity_order.index(start_index)
             tsp_solver = ORToolsTSP()
-            route_indices = tsp_solver.solve_tsp(duration_matrix, time_limit)
-            
-            # 시작점 기준 재정렬
-            start_pos = route_indices.index(start_index)
-            route_indices = route_indices[start_pos:] + route_indices[:start_pos]
-            
-            # 3. 결과 계산
+            tsp_route = tsp_solver.solve_path(
+                reordered_matrix,
+                start_index=start_pos,
+                time_limit=time_limit
+            )
+
+            # 5. 원본 인덱스로 복원 (⚠️ 중복 없음)
+            route_indices = [proximity_order[i] for i in tsp_route]
+
+            # 6. 경로 좌표
             route_coords = [coordinates[i] for i in route_indices]
-            total_duration = sum(duration_matrix[route_indices[i]][route_indices[(i+1) % len(route_indices)]]
-                               for i in range(len(route_indices)))
+
+            # 7. 총 소요시간 (편도)
+            total_duration = 0.0
+            for i in range(len(route_indices) - 1):
+                a, b = route_indices[i], route_indices[i + 1]
+                total_duration += duration_matrix[a][b]
             
-            # 4. 고속 캐싱 (좌표 해시 기반)
+            # 8. 캐싱
             coord_hash = hash(json.dumps(sorted(coordinates, key=lambda x: (x[0], x[1]))))
-            cache_key = f"route_opt_{coord_hash}_{mode}_{start_index}"
+            cache_key = f"route_opt_{coord_hash}_{mode}_{station_name}"
             cache.set(cache_key, {
                 'route_indices': route_indices,
                 'total_duration': total_duration,
-                'matrix_shape': duration_matrix.shape
-            }, 1800)  # 30분 캐싱
+                'station': station_name
+            }, 1800)
             
-            # 5. 상세 결과
+            # 9. 응답
             elapsed = time.time() - start_time
+            popup_center = [sum(c[0] for c in coordinates)/n, sum(c[1] for c in coordinates)/n]
+            
             result = {
                 'success': True,
                 'n_locations': n,
@@ -414,26 +443,26 @@ class RouteOptimizationView(APIView):
                 'route_coordinates': route_coords,
                 'total_duration': float(total_duration),
                 'total_duration_minutes': round(total_duration / 60, 1),
-                'total_duration_hours': round(total_duration / 3600, 2),
                 'start_index': start_index,
                 'mode': mode,
                 'osrm_used': calculator.osrm_available,
                 'processing_time': round(elapsed, 2),
-                'status': '완료',
-                'cache_key': cache_key,
-                'estimated_quality': 'OSRM' if calculator.osrm_available else 'Haversine'
+                
+                # 🚉 역 정보
+                'auto_selected_station': station_name,
+                'station_coordinates': station_coords,
+                'station_to_popup_center_minutes': round(station_distance / 60, 1),
+                'popup_center': popup_center,
+                'proximity_order': proximity_order[:5],
             }
             
-            logger.info(f"✅ 최적화 완료: {n}개 → {result['total_duration_minutes']:.1f}분 "
-                       f"({elapsed:.2f}s, OSRM:{calculator.osrm_available})")
-            
+            logger.info(f"✅ 완료: {n}개 → {result['total_duration_minutes']:.1f}분 ({station_name}역)")
             return Response(result, status=status.HTTP_200_OK)
             
         except Exception as e:
             logger.error(f"❌ 경로 최적화 실패: {str(e)}", exc_info=True)
             return Response({
                 'success': False,
-                'error': '서버 내부 오류 - Haversine 폴백으로 재시도',
-                'n_locations': n,
-                'fallback': 'Haversine 사용'
+                'error': str(e),
+                'n_locations': n
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
