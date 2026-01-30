@@ -195,30 +195,43 @@ class OSRMDistanceCalculator:
         return matrix
 
 class ORToolsTSP:
-    """⚡ OR-Tools Path TSP Solver (편도 전용)"""
+    """⚡ OR-Tools 안정 Cycle TSP → Path 변환"""
 
     @staticmethod
-    def solve_path(distance_matrix: np.ndarray, start_index: int = 0, time_limit: int = 90) -> List[int]:
+    def solve_path(
+        distance_matrix: np.ndarray,
+        start_index: int = 0,
+        time_limit: int = 90
+    ) -> List[int]:
+
         n = distance_matrix.shape[0]
         if n <= 1:
             return list(range(n))
 
+        # 소규모는 NN이 더 안정 + 빠름
+        if n <= 2:
+            return ORToolsTSP._nearest_neighbor_path(distance_matrix, start_index)
+
         try:
-            return ORToolsTSP._ortools_solve_path(distance_matrix, start_index, time_limit)
+            return ORToolsTSP._ortools_cycle_to_path(
+                distance_matrix,
+                start_index,
+                time_limit
+            )
         except Exception as e:
-            logger.warning(f"❌ OR-Tools 실패 → NN 폴백: {str(e)[:50]}")
+            logger.warning(f"❌ OR-Tools 실패 → NN 폴백: {str(e)[:60]}")
             return ORToolsTSP._nearest_neighbor_path(distance_matrix, start_index)
 
     @staticmethod
-    def _ortools_solve_path(matrix: np.ndarray, start_index: int, time_limit: int) -> List[int]:
+    def _ortools_cycle_to_path(
+        matrix: np.ndarray,
+        start_index: int,
+        time_limit: int
+    ) -> List[int]:
+
         n = matrix.shape[0]
 
-        manager = pywrapcp.RoutingIndexManager(
-            n,
-            1,
-            start_index,          # 시작점 고정
-            list(range(n))        # ❗ 모든 노드를 종료 후보로
-        )
+        manager = pywrapcp.RoutingIndexManager(n, 1, start_index)
         routing = pywrapcp.RoutingModel(manager)
 
         def distance_callback(from_index, to_index):
@@ -240,15 +253,21 @@ class ORToolsTSP:
 
         solution = routing.SolveWithParameters(search_parameters)
         if not solution:
-            raise ValueError("OR-Tools Path 솔루션 실패")
+            raise ValueError("OR-Tools 솔루션 없음")
 
+        # cycle route 추출
         route = []
         index = routing.Start(0)
         while not routing.IsEnd(index):
             route.append(manager.IndexToNode(index))
             index = solution.Value(routing.NextVar(index))
 
-        return route
+        # cycle → path (start_index 기준으로 절단)
+        if route[0] == start_index:
+            return route
+
+        idx = route.index(start_index)
+        return route[idx:] + route[:idx]
 
     @staticmethod
     def _nearest_neighbor_path(matrix: np.ndarray, start: int) -> List[int]:
@@ -336,6 +355,30 @@ class RouteOptimizationView(APIView):
         
         distances.sort(key=lambda x: x[1])
         return [idx for idx, _ in distances]
+    
+    def _split_by_station_distance(
+        self,
+        coordinates: List[List[float]],
+        station_coords: List[float],
+        threshold_minutes: float = 15.0
+    ) -> tuple[list[int], list[int]]:
+        """
+        역 기준 도보 거리로 near / far 분리
+        """
+        near, far = [], []
+
+        for i, (lat, lon) in enumerate(coordinates):
+            duration_sec = self._haversine_distance(
+                station_coords[0], station_coords[1], lat, lon
+            )
+            duration_min = duration_sec / 60
+
+            if duration_min <= threshold_minutes:
+                near.append(i)
+            else:
+                far.append(i)
+
+        return near, far
 
     @extend_schema(
         summary="팝업스토어 최적 방문 순서 계산 (역 자동선택)",
@@ -397,21 +440,43 @@ class RouteOptimizationView(APIView):
             calculator = OSRMDistanceCalculator()
             duration_matrix = calculator.get_duration_matrix(coordinates, mode)
             
-            # 3. 역 기준 근접도 정렬
-            proximity_order = self._sort_by_proximity(coordinates, station_coords)
-            reordered_matrix = duration_matrix[np.ix_(proximity_order, proximity_order)]
-
-            # 4. 편도 TSP (Path)
-            start_pos = proximity_order.index(start_index)
-            tsp_solver = ORToolsTSP()
-            tsp_route = tsp_solver.solve_path(
-                reordered_matrix,
-                start_index=start_pos,
-                time_limit=time_limit
+            # 3️. 역 기준 near / far 분리
+            near, far = self._split_by_station_distance(
+                coordinates,
+                station_coords,
+                threshold_minutes=15.0
             )
 
-            # 5. 원본 인덱스로 복원 (⚠️ 중복 없음)
-            route_indices = [proximity_order[i] for i in tsp_route]
+            logger.info(f"📍 역 기준 분리: near={len(near)}, far={len(far)}")
+
+            route_indices = []
+
+            # 4. near 먼저 TSP
+            if near:
+                near_matrix = duration_matrix[np.ix_(near, near)]
+
+                # 시작점이 near에 있으면 그걸로, 아니면 near[0]
+                near_start = near.index(start_index) if start_index in near else 0
+
+                near_route = ORToolsTSP.solve_path(
+                    near_matrix,
+                    start_index=near_start,
+                    time_limit=time_limit
+                )
+
+                route_indices.extend([near[i] for i in near_route])
+
+            # 5️. far 나중에 TSP
+            if far:
+                far_matrix = duration_matrix[np.ix_(far, far)]
+
+                far_route = ORToolsTSP.solve_path(
+                    far_matrix,
+                    start_index=0,
+                    time_limit=time_limit
+                )
+
+                route_indices.extend([far[i] for i in far_route])
 
             # 6. 경로 좌표
             route_coords = [coordinates[i] for i in route_indices]
@@ -453,7 +518,6 @@ class RouteOptimizationView(APIView):
                 'station_coordinates': station_coords,
                 'station_to_popup_center_minutes': round(station_distance / 60, 1),
                 'popup_center': popup_center,
-                'proximity_order': proximity_order[:5],
             }
             
             logger.info(f"✅ 완료: {n}개 → {result['total_duration_minutes']:.1f}분 ({station_name}역)")
