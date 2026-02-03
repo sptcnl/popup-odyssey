@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { storesApi } from '../api/stores'
 
-export default function AddPlaceModal({ onClose }) {
+export default function AddPlaceModal({ onClose, onSuccess }) {
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
   const [startDate, setStartDate] = useState('')
@@ -28,14 +28,23 @@ export default function AddPlaceModal({ onClose }) {
 
     try {
       setIsLoading(true)
-      await storesApi.createPlace({
-        name, 
+      console.log('SUBMIT payload', {
+        name,
         address,
-        isPopup: isPopup,
+        is_popup: isPopup,
         start_date: startDate,
         end_date: endDate,
         is_public: isPublic
       })
+      await storesApi.createPlace({
+        name, 
+        address,
+        is_popup: isPopup,
+        start_date: startDate,
+        end_date: endDate,
+        is_public: isPublic
+      })
+      onSuccess()
       alert('장소가 등록되었습니다!')
       onClose()
     } catch (error) {

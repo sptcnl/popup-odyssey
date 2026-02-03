@@ -166,6 +166,11 @@ export default function App() {
     setShowAddModal(true)
   }
 
+  const handlePlaceAdded = async () => {
+    await fetchPlaces()
+    setShowAddModal(false)
+  }
+
   // 🔥 완벽한 필터링 (내 비공개 장소 포함)
   const filteredPlaces = places.filter(p => {
     // 1️⃣ 팝업/일반 분류
@@ -381,11 +386,7 @@ export default function App() {
       {showAddModal && (
         <AddPlaceModal
           onClose={() => setShowAddModal(false)}
-          onSuccess={async () => {
-            console.log('➕ 장소 추가 성공')
-            await fetchPlaces()
-            setShowAddModal(false)
-          }}
+          onSuccess={handlePlaceAdded}
         />
       )}
     </div>
