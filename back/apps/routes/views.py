@@ -451,32 +451,33 @@ class RouteOptimizationView(APIView):
 
             route_indices = []
 
-            # 4. near 먼저 TSP
+            # 4. near 먼저 TSP (역 기준 가장 가까운 팝업부터 시작)
             if near:
                 near_matrix = duration_matrix[np.ix_(near, near)]
-
-                # 시작점이 near에 있으면 그걸로, 아니면 near[0]
-                near_start = near.index(start_index) if start_index in near else 0
-
+                
+                # near[0] = 역에서 가장 가까운 팝업
+                # start_index 무시하고 near[0]부터 시작
                 near_route = ORToolsTSP.solve_path(
                     near_matrix,
-                    start_index=near_start,
+                    start_index=0,  # near[0] 기준
                     time_limit=time_limit
                 )
-
                 route_indices.extend([near[i] for i in near_route])
 
-            # 5️. far 나중에 TSP
+            # 5. far 나중에 TSP (역 기준 멀리 있는 순)
             if far:
-                far_matrix = duration_matrix[np.ix_(far, far)]
-
+                # far를 역 기준 거리순 정렬
+                far_sorted = sorted(far, key=lambda i: self._haversine_distance(
+                    station_coords[0], station_coords[1], 
+                    coordinates[i][0], coordinates[i][1]
+                ))
+                far_matrix = duration_matrix[np.ix_(far_sorted, far_sorted)]
                 far_route = ORToolsTSP.solve_path(
                     far_matrix,
                     start_index=0,
                     time_limit=time_limit
                 )
-
-                route_indices.extend([far[i] for i in far_route])
+                route_indices.extend([far_sorted[i] for i in far_route])
 
             # 6. 경로 좌표
             route_coords = [coordinates[i] for i in route_indices]
