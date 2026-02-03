@@ -1,8 +1,8 @@
 const API_BASE = import.meta.env.VITE_API_BASE;
 
 export const storesApi = {
-  async createPlace({ name, address, isPopup, start_date, end_date, is_public = true }) {
-    console.log('Place 생성 API 호출:', { name, address, isPopup, start_date, end_date, is_public });
+  async createPlace({ name, address, is_popup, start_date, end_date, is_public = true }) {
+    console.log('Place 생성 API 호출:', { name, address, is_popup, start_date, end_date, is_public });
     
     const response = await fetch(`${API_BASE}/places/`, {
       method: 'POST',
@@ -14,7 +14,7 @@ export const storesApi = {
         name, 
         address, 
         is_public,
-        ...(isPopup && { start_date, end_date })
+        ...(is_popup && { start_date, end_date })
       }),
     });
     

@@ -9,7 +9,6 @@ from django.db.models import Q
 
 
 class PlaceListCreateAPIView(generics.ListCreateAPIView):
-    serializer_class = PlaceListSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
     
     def get_serializer_class(self):
