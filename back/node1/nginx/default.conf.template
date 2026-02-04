@@ -1,0 +1,15 @@
+upstream django {
+    server ${NODE2_IP}:8000;
+    server ${NODE3_IP}:8000;
+}
+
+server {
+    listen 80;
+
+    location / {
+        proxy_pass http://django;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
