@@ -1,10 +1,12 @@
+import { authFetch } from './authFetch';
+
 const API_BASE = import.meta.env.VITE_API_BASE;
 
 export const storesApi = {
   async createPlace({ name, address, is_popup, start_date, end_date, is_public = true }) {
     console.log('Place 생성 API 호출:', { name, address, is_popup, start_date, end_date, is_public });
     
-    const response = await fetch(`${API_BASE}/places/`, {
+    const response = await authFetch(`${API_BASE}/places/`, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
@@ -40,7 +42,7 @@ export const storesApi = {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE}/places/`, { 
+    const response = await authFetch(`${API_BASE}/places/`, { 
       headers,
       cache: 'no-store',
     });
@@ -56,7 +58,7 @@ export const storesApi = {
   async optimizeRoute({ coordinates }) {
     console.log('API 호출:', { coordinates })
     
-    const response = await fetch(`${API_BASE}/routes/compute/`, {
+    const response = await authFetch(`${API_BASE}/routes/compute/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ coordinates }),
