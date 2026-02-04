@@ -6,6 +6,8 @@ from rest_framework.exceptions import PermissionDenied
 from .serializers import PlaceCreateSerializer, PlaceListSerializer
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from django.db.models import Q
+import logging
+logger = logging.getLogger(__name__)
 
 
 class PlaceListCreateAPIView(generics.ListCreateAPIView):
@@ -30,4 +32,5 @@ class PlaceListCreateAPIView(generics.ListCreateAPIView):
         return Place.objects.filter(is_public=True)
     
     def perform_create(self, serializer):
+        logger.info("🔥 validated_data: %s", serializer.validated_data)
         serializer.save(user=self.request.user)

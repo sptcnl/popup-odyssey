@@ -14,6 +14,7 @@ export const storesApi = {
         name, 
         address, 
         is_public,
+        is_popup,
         ...(is_popup && { start_date, end_date })
       }),
     });
