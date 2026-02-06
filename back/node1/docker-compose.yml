@@ -1,7 +1,62 @@
 services:
   nginx:
     image: nginx:alpine
+    container_name: popup_nginx
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    volumes:
+      - ./nginx:/etc/nginx/templates
+      - certbot_www:/var/www/certbot
+      - certbot_conf:/etc/letsencrypt
+
     ports:
       - "80:80"
+      - "443:443"
+
+    command: >
+      /bin/sh -c "
+      envsubst < /etc/nginx/templates/default.conf.template
+      > /etc/nginx/conf.d/default.conf &&
+      nginx -g 'daemon off;'"
+
+  certbot:
+    image: certbot/certbot
+    container_name: popup_certbot
+
+    env_file:
+      - .env
+
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_www:/var/www/certbot
+      - certbot_conf:/etc/letsencrypt
+
+    entrypoint: >
+      sh -c "certbot certonly --webroot
+      --webroot-path=/var/www/certbot
+      --email ${EMAIL}
+      --agree-tos
+      --no-eff-email
+      -d ${DOMAIN}"
+  
+    duckdns:
+    image: lscr.io/linuxserver/duckdns
+    container_name: duckdns
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      - SUBDOMAINS=popupodyssey
+      - TOKEN=${DUCKDNS_TOKEN}
+      - LOG_FILE=true
+
+    volumes:
+      - ./duckdns:/config
+
+volumes:
+  certbot_www:
+  certbot_conf:
