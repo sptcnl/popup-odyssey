@@ -24,11 +24,11 @@ services:
       - db
     environment:
       - DATABASE_URL=postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@db:5432/${LOCAL_DB_NAME}
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     volumes:
       - .:/app
-  
+
   popup-crawler:
     build:
       context: .
@@ -40,13 +40,49 @@ services:
       - DATABASE_URL=postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@db:5432/${LOCAL_DB_NAME}
     volumes:
       - ./data:/app/data
-      - /tmp:/tmp  # 디버그 파일용
+      - /tmp:/tmp
       - ./data/images:/app/data/images
     env_file:
-    - ./.env
+      - ./.env
     restart: unless-stopped
     profiles:
       - crawler
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    depends_on:
+      - django
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    restart: unless-stopped
+
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    entrypoint: >
+      sh -c "trap exit TERM;
+      while :; do
+        certbot renew;
+        sleep 12h;
+      done"
+
+  duckdns:
+    image: lscr.io/linuxserver/duckdns:latest
+    environment:
+      - SUBDOMAINS=${DUCKDNS_SUBDOMAIN}
+      - TOKEN=${DUCKDNS_TOKEN}
+      - TZ=Asia/Seoul
+    restart: unless-stopped
 
 volumes:
   postgres_data:
